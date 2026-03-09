@@ -249,9 +249,7 @@ def load_data():
 
     funds = pd.concat([parse_excel("funds1.xlsx"),
                        parse_excel("funds2.xlsx")], axis=1, sort=True)
-    cutoff = nifty.index.max() - pd.DateOffset(years=6)
-    nifty  = nifty[nifty.index >= cutoff]
-    funds  = funds[funds.index >= cutoff]
+    # Return FULL data — year filtering happens in the UI based on user selection
     common = nifty.index.intersection(funds.index)
     nifty  = nifty.reindex(common)
     funds  = funds.reindex(common)
@@ -288,7 +286,7 @@ def build_matrices(_all_funds, _events_df, fixed_days, _last_date):
 # ─────────────────────────────────────────────────────────────
 #  APP UI
 # ─────────────────────────────────────────────────────────────
-st.title("📊 Fund Crash & Recovery Analysis  —  Last 6 Years")
+st.title("📊 Fund Crash & Recovery Analysis")
 st.markdown(
     "Ranks mutual funds on **two dimensions** during every Nifty crash:  \n"
     "📉 **Drawdown resilience** — which funds fell least  \n"
@@ -297,18 +295,47 @@ st.markdown(
 )
 
 with st.spinner("Loading data…"):
-    nifty, all_funds, category_map = load_data()
+    nifty_full, all_funds_full, category_map = load_data()
 
-last_date = nifty.index.max()
+last_date  = nifty_full.index.max()
+first_date = nifty_full.index.min()
 
 # ── Sidebar ──────────────────────────────────────────────────
 st.sidebar.header("⚙️  Settings")
+
+# Year range selector — how far back to analyse
+st.sidebar.markdown("### 📅 Analysis Period")
+years_back = st.sidebar.select_slider(
+    "How many years back?",
+    options=[1, 2, 3, 4, 5, 6],
+    value=6,
+    help="Choose how many years of history to include in the analysis"
+)
+cutoff = last_date - pd.DateOffset(years=years_back)
+# Fund data starts Jan 2020 — clamp cutoff so we don't request data before that
+cutoff = max(cutoff, first_date)
+
+# Apply year filter
+nifty     = nifty_full[nifty_full.index >= cutoff]
+all_funds = all_funds_full[all_funds_full.index >= cutoff]
+
+# Show what period is selected
+period_start = nifty.index.min()
+st.sidebar.info(
+    f"📆 **{years_back} year{'s' if years_back > 1 else ''} of data**  \n"
+    f"{period_start.strftime('%d %b %Y')} → {last_date.strftime('%d %b %Y')}  \n"
+    f"({len(nifty)} trading days)"
+)
+
+st.sidebar.markdown("---")
+st.sidebar.markdown("### ⚡ Crash Detection")
 threshold = st.sidebar.slider(
     "Nifty crash trigger (%)", 2.0, 25.0, 9.0, 0.5,
     help="Detect events where Nifty fell ≥ this % from its rolling peak")
 fixed_days = st.sidebar.slider(
     "Recovery window for incomplete recoveries (days)", 30, 365, 90, 10,
     help="If Nifty hasn't fully recovered yet, measure fund gain over this many days from trough")
+st.sidebar.markdown("### 🎛️ Display")
 top_n = st.sidebar.slider("Top N funds per category", 3, 15, 5)
 all_cats      = sorted(set(category_map.values()))
 selected_cats = st.sidebar.multiselect("Show categories", all_cats, default=all_cats)
@@ -357,8 +384,9 @@ avg_nifty_crash = events_df["nifty_fall"].mean()
 
 # ── Top-level metrics ─────────────────────────────────────────
 c1, c2, c3, c4, c5 = st.columns(5)
-c1.metric("📅 Data Range",
-          f"{nifty.index.min().strftime('%b %Y')} – {last_date.strftime('%b %Y')}")
+c1.metric("📅 Period",
+          f"{nifty.index.min().strftime('%b %Y')} – {last_date.strftime('%b %Y')}",
+          delta=f"{years_back} yr{'s' if years_back>1 else ''}")
 c2.metric("📊 Funds", len(all_funds.columns))
 c3.metric(f"⚡ Crashes ≥ {threshold}%", len(events_df))
 c4.metric("📉 Worst Crash", f"{events_df['nifty_fall'].min():.1f}%")
