@@ -296,14 +296,14 @@ with tab3:
 # ─── Tab 4: Full table ─────────────────────────
 with tab4:
     st.subheader("🗂️ Full Drawdown Table — All Events × All Funds")
-    st.markdown("Each cell = fund's drawdown during that Nifty event (start-to-trough). **Green = outperformed Nifty, Red = underperformed.**")
+    st.markdown("Each cell = fund's drawdown during that Nifty event. 🟢 Green = small drawdown, 🔴 Red = large drawdown.")
 
     # Build matrix
     records = []
     for fund in all_funds.columns:
         row = {"Fund": fund, "Category": category_map[fund]}
         for i, ev in events_df.iterrows():
-            label = f"Event {i+1}\n({ev['start'].strftime('%b %y')})"
+            label = f"Ev{i+1} ({ev['start'].strftime('%b %y')})"
             dd = fund_dd_during_event(all_funds[fund].dropna(), ev["start"], ev["end"])
             row[label] = round(dd, 2) if not np.isnan(dd) else None
         records.append(row)
@@ -315,21 +315,47 @@ with tab4:
     if cat_filter != "All":
         matrix_df = matrix_df[matrix_df["Category"] == cat_filter]
 
-    event_cols = [c for c in matrix_df.columns if c.startswith("Event")]
-    display_df = matrix_df.set_index(["Category", "Fund"])[event_cols]
+    event_cols = [c for c in matrix_df.columns if c.startswith("Ev")]
 
-    def color_cell(val):
+    def dd_to_rgb(val):
+        """Pure Python RGB: 0% → green, -30% → red, no matplotlib needed."""
         if val is None or (isinstance(val, float) and np.isnan(val)):
-            return "background-color: #f5f5f5; color: #999"
-        # Scale: 0% = green, -30% = red, intermediate = yellow
+            return "#f0f0f0", "#999999"
         ratio = max(0.0, min(1.0, abs(val) / 30.0))
         r = int(255 * ratio)
-        g = int(200 * (1 - ratio * 0.6))
-        b = 80
-        return f"background-color: rgb({r},{g},{b}); color: #111"
+        g = int(180 * (1.0 - ratio * 0.7))
+        b = 60
+        bg = f"#{r:02x}{g:02x}{b:02x}"
+        fg = "#ffffff" if ratio > 0.5 else "#111111"
+        return bg, fg
 
-    styled = display_df.style.applymap(color_cell).format("{:.1f}%", na_rep="–")
-    st.dataframe(styled, use_container_width=True, height=500)
+    # Build plain HTML table — zero dependency on matplotlib / pandas Styler
+    ev_labels = event_cols
+    html_rows = []
+    for _, row in matrix_df.iterrows():
+        cells = f"<td style='padding:4px 8px;white-space:nowrap;font-size:12px'><b>{row['Category']}</b></td>"
+        cells += f"<td style='padding:4px 8px;white-space:nowrap;font-size:12px'>{row['Fund']}</td>"
+        for col in ev_labels:
+            val = row[col]
+            bg, fg = dd_to_rgb(val)
+            txt = f"{val:.1f}%" if val is not None and not (isinstance(val, float) and np.isnan(val)) else "–"
+            cells += f"<td style='background:{bg};color:{fg};padding:4px 6px;text-align:center;font-size:11px'>{txt}</td>"
+        html_rows.append(f"<tr>{cells}</tr>")
+
+    header_cells = "<th style='padding:4px 8px;background:#1e3a5f;color:white'>Category</th>"
+    header_cells += "<th style='padding:4px 8px;background:#1e3a5f;color:white'>Fund</th>"
+    for col in ev_labels:
+        header_cells += f"<th style='padding:4px 6px;background:#1e3a5f;color:white;font-size:11px;white-space:nowrap'>{col}</th>"
+
+    html_table = f"""
+    <div style='overflow-x:auto;overflow-y:auto;max-height:520px;border:1px solid #ddd;border-radius:6px'>
+      <table style='border-collapse:collapse;width:100%'>
+        <thead><tr>{header_cells}</tr></thead>
+        <tbody>{''.join(html_rows)}</tbody>
+      </table>
+    </div>
+    """
+    st.html(html_table)
 
 st.divider()
 st.caption("Data: Nifty50 (10-year daily close) • Mutual Fund NAV data from uploaded files • Drawdown = peak-to-trough decline")
