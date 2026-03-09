@@ -14,19 +14,20 @@ st.set_page_config(page_title="Fund Drawdown Analysis vs Nifty", layout="wide", 
 # ─────────────────────────────────────────────
 
 def classify_category(name):
-    name_lower = name.lower()
-    if "small cap" in name_lower or "smallcap" in name_lower:
-        return "Small Cap"
-    elif "mid cap" in name_lower or "midcap" in name_lower:
-        return "Mid Cap"
-    elif "large & mid" in name_lower or "large and mid" in name_lower or "large & midcap" in name_lower:
-        return "Large & Mid Cap"
-    elif "large cap" in name_lower or "largecap" in name_lower:
-        return "Large Cap"
-    elif "multi cap" in name_lower or "multicap" in name_lower:
-        return "Multi Cap"
-    elif "flexi cap" in name_lower or "flexicap" in name_lower:
+    n = name.lower()
+    # ORDER MATTERS: check compound/specific categories BEFORE simple ones
+    if "flexi cap" in n or "flexicap" in n:
         return "Flexi Cap"
+    elif "small cap" in n or "smallcap" in n:
+        return "Small Cap"
+    elif "multi cap" in n or "multicap" in n:
+        return "Multi Cap"
+    elif "large & mid" in n or "large and mid" in n or "large & midcap" in n or "large midcap" in n:
+        return "Large & Mid Cap"
+    elif "large cap" in n or "largecap" in n:
+        return "Large Cap"
+    elif "mid cap" in n or "midcap" in n:
+        return "Mid Cap"
     else:
         return "Other"
 
