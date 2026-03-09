@@ -316,9 +316,19 @@ with tab4:
         matrix_df = matrix_df[matrix_df["Category"] == cat_filter]
 
     event_cols = [c for c in matrix_df.columns if c.startswith("Event")]
-    styled = matrix_df.set_index(["Category", "Fund"])[event_cols].style.background_gradient(
-        cmap="RdYlGn", axis=None, vmin=-30, vmax=0
-    ).format("{:.1f}%", na_rep="–")
+    display_df = matrix_df.set_index(["Category", "Fund"])[event_cols]
+
+    def color_cell(val):
+        if val is None or (isinstance(val, float) and np.isnan(val)):
+            return "background-color: #f5f5f5; color: #999"
+        # Scale: 0% = green, -30% = red, intermediate = yellow
+        ratio = max(0.0, min(1.0, abs(val) / 30.0))
+        r = int(255 * ratio)
+        g = int(200 * (1 - ratio * 0.6))
+        b = 80
+        return f"background-color: rgb({r},{g},{b}); color: #111"
+
+    styled = display_df.style.applymap(color_cell).format("{:.1f}%", na_rep="–")
     st.dataframe(styled, use_container_width=True, height=500)
 
 st.divider()
