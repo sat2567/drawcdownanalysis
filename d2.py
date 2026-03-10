@@ -29,11 +29,13 @@ def load_all_data():
             data[col] = pd.to_numeric(data[col], errors="coerce")
         return data
 
-    f1       = parse_excel("funds1.xlsx")
-    f2       = parse_excel("funds2.xlsx")
-    sec      = parse_excel("sectorfunds.xlsx")
+    f1         = parse_excel("funds1.xlsx")
+    f2         = parse_excel("funds2.xlsx")
+    sec1       = parse_excel("sector1.xlsx")
+    sec2       = parse_excel("sector2.xlsx")
+    sec3       = parse_excel("sector3.xlsx")
     multiasset = parse_excel("multiasset.xlsx")
-    funds = pd.concat([f1, f2, sec, multiasset], axis=1, sort=True)
+    funds = pd.concat([f1, f2, sec1, sec2, sec3, multiasset], axis=1, sort=True)
 
     def classify(name):
         n = name.lower()
@@ -58,7 +60,9 @@ def load_all_data():
     type_map = {}
     for col in f1.columns:         type_map[col] = "Equity"
     for col in f2.columns:         type_map[col] = "Equity"
-    for col in sec.columns:        type_map[col] = "Sector"
+    for col in sec1.columns:       type_map[col] = "Sector"
+    for col in sec2.columns:       type_map[col] = "Sector"
+    for col in sec3.columns:       type_map[col] = "Sector"
     for col in multiasset.columns: type_map[col] = "MultiAsset"
     return nifty, funds, cat_map, type_map
 
