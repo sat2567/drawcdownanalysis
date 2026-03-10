@@ -124,14 +124,24 @@ def find_crashes(nifty, threshold):
 #  FUND RETURNS IN A WINDOW — direct NAV lookup
 # ─────────────────────────────────────────────────────────────
 
-def fund_returns_in_window(funds, cat_map, start_date, end_date):
-    """% change in fund NAV from start_date to end_date."""
+def fund_returns_in_window(funds, cat_map, start_date, end_date, max_gap_days=7):
+    """
+    % change in fund NAV from start_date to end_date.
+    Excludes funds whose NAV starts more than max_gap_days after start_date
+    or ends more than max_gap_days before end_date (incomplete period data).
+    """
     rows = []
     for fund in funds.columns:
         nav = funds[fund].dropna()
         s   = nav[nav.index >= start_date]
         e   = nav[nav.index <= end_date]
         if s.empty or e.empty:
+            continue
+        # Fund started too late — missed the beginning of the period
+        if (s.index[0] - start_date).days > max_gap_days:
+            continue
+        # Fund data ended too early — missed the end of the period
+        if (end_date - e.index[-1]).days > max_gap_days:
             continue
         v0 = float(s.iloc[0])
         v1 = float(e.iloc[-1])
