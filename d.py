@@ -3,7 +3,7 @@ import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
 
-st.set_page_config(page_title="Fund Crash Analysis", layout="wide", page_icon="📉")
+st.set_page_config(page_title="Fund Crash & Recovery Analysis", layout="wide", page_icon="📉")
 
 # ─────────────────────────────────────────────────────────────
 #  DATA LOADING
@@ -96,12 +96,18 @@ def find_crashes(nifty, threshold):
                     trough_val = prices[j]
                 j += 1
         if in_crash:
+            # Find Nifty full recovery date (first close >= peak_val after trough)
+            after_trough = nifty[nifty.index > dates[trough_idx]]
+            recovered    = after_trough[after_trough >= peak_val]
+            rec_date     = recovered.index[0] if not recovered.empty else None
+
             events.append({
-                "peak_date":   dates[peak_idx],
-                "trough_date": dates[trough_idx],
-                "peak_val":    round(float(peak_val), 2),
-                "trough_val":  round(float(trough_val), 2),
-                "nifty_fall":  round((trough_val - peak_val) / peak_val * 100, 2),
+                "peak_date":     dates[peak_idx],
+                "trough_date":   dates[trough_idx],
+                "peak_val":      round(float(peak_val), 2),
+                "trough_val":    round(float(trough_val), 2),
+                "nifty_fall":    round((trough_val - peak_val) / peak_val * 100, 2),
+                "recovery_date": rec_date,
             })
             i = trough_idx + 1
         else:
@@ -110,10 +116,11 @@ def find_crashes(nifty, threshold):
 
 
 # ─────────────────────────────────────────────────────────────
-#  FUND RETURNS IN WINDOW — direct NAV lookup, no cache
+#  FUND RETURNS IN A WINDOW — direct NAV lookup
 # ─────────────────────────────────────────────────────────────
 
 def fund_returns_in_window(funds, cat_map, start_date, end_date):
+    """% change in fund NAV from start_date to end_date."""
     rows = []
     for fund in funds.columns:
         nav = funds[fund].dropna()
@@ -134,10 +141,76 @@ def fund_returns_in_window(funds, cat_map, start_date, end_date):
 
 
 # ─────────────────────────────────────────────────────────────
+#  CHART HELPER
+# ─────────────────────────────────────────────────────────────
+
+def draw_bar_chart(cat_df, nifty_ref, annotation, top_n, mode):
+    """
+    mode = 'crash'    → lower bar = better, red bars are bad
+    mode = 'recovery' → higher bar = better, blue bars are good
+    """
+    plot_df = (cat_df
+               .sort_values("Return", ascending=False)
+               .head(top_n)
+               .sort_values("Return", ascending=True)   # Plotly renders bottom→top
+               .copy())
+    if plot_df.empty:
+        return None, None
+
+    if mode == "crash":
+        colors = [
+            "#2196f3" if v >= nifty_ref * 0.5
+            else "#66bb6a" if v >= nifty_ref
+            else "#ef9a9a"
+            for v in plot_df["Return"]
+        ]
+        vline_color = "red"
+    else:
+        colors = [
+            "#1565c0" if v >= nifty_ref * 1.1
+            else "#42a5f5" if v >= nifty_ref
+            else "#ffcc80"
+            for v in plot_df["Return"]
+        ]
+        vline_color = "#42a5f5"
+
+    fig = go.Figure()
+    fig.add_trace(go.Bar(
+        x=plot_df["Return"],
+        y=plot_df["Fund"].apply(lambda x: x[:60] + "…" if len(x) > 60 else x),
+        orientation="h",
+        marker_color=colors,
+        text=plot_df["Return"].map("{:.1f}%".format),
+        textposition="outside",
+    ))
+    fig.add_vline(
+        x=nifty_ref,
+        line_dash="dash", line_color=vline_color, line_width=2,
+        annotation_text=annotation,
+        annotation_font_size=11, annotation_font_color=vline_color,
+    )
+    fig.add_vline(x=0, line_color="#aaa", line_width=1)
+    fig.update_layout(
+        height=max(300, len(plot_df) * 50),
+        template="plotly_dark",
+        margin=dict(l=10, r=90, t=10, b=10),
+        xaxis=dict(ticksuffix="%", title=""),
+        yaxis=dict(title=""),
+        showlegend=False,
+    )
+
+    tbl = plot_df[["Fund", "Return"]].copy().reset_index(drop=True)
+    tbl["vs Nifty"] = (plot_df["Return"].values - nifty_ref)
+    tbl["vs Nifty"] = tbl["vs Nifty"].map(lambda x: f"+{x:.1f}%" if x >= 0 else f"{x:.1f}%")
+    tbl["Return"]   = tbl["Return"].map("{:.1f}%".format)
+    return fig, tbl
+
+
+# ─────────────────────────────────────────────────────────────
 #  APP
 # ─────────────────────────────────────────────────────────────
 
-st.title("📉 Fund Returns During Nifty Crashes")
+st.title("📉 Fund Crash & Recovery Analysis")
 
 with st.spinner("Loading data…"):
     nifty, funds, cat_map = load_all_data()
@@ -154,109 +227,140 @@ if crashes.empty:
 
 # Event selector
 ev_labels = [
-    f"Ev{i+1}:  {r['peak_date'].strftime('%d %b %Y')}  →  {r['trough_date'].strftime('%d %b %Y')}   |   Nifty {r['nifty_fall']:.1f}%"
+    f"Ev{i+1}:  {r['peak_date'].strftime('%d %b %Y')}  →  "
+    f"{r['trough_date'].strftime('%d %b %Y')}   |   Nifty {r['nifty_fall']:.1f}%"
     for i, r in crashes.iterrows()
 ]
 
 st.subheader(f"{len(crashes)} Nifty crash(es) ≥ {threshold:.0f}% detected")
-
 sel_label = st.selectbox("Select crash event:", ev_labels, index=len(ev_labels) - 1)
 sel_idx   = ev_labels.index(sel_label)
 ev        = crashes.iloc[sel_idx]
 
-peak_dt   = ev["peak_date"]
-trough_dt = ev["trough_date"]
-nifty_ret = ev["nifty_fall"]
+peak_dt    = ev["peak_date"]
+trough_dt  = ev["trough_date"]
+nifty_fall = ev["nifty_fall"]
+rec_date   = ev["recovery_date"]
 
-c1, c2, c3 = st.columns(3)
-c1.metric("Peak Date",   peak_dt.strftime("%d %b %Y"))
-c2.metric("Trough Date", trough_dt.strftime("%d %b %Y"))
-c3.metric("Nifty Fall",  f"{nifty_ret:.1f}%")
+# Recovery window for this event
+if rec_date is not None:
+    recovery_end  = rec_date
+    recovery_label = f"Full recovery ({rec_date.strftime('%d %b %Y')})"
+    is_full        = True
+else:
+    # Not yet recovered — use slider for partial window
+    fixed_days    = st.sidebar.slider("Recovery window (days, since not recovered)", 30, 730, 180, 10)
+    recovery_end  = min(trough_dt + pd.Timedelta(days=fixed_days), nifty.index.max())
+    recovery_label = f"Partial ({fixed_days}d from trough)"
+    is_full        = False
 
-st.caption(
-    f"Each fund's NAV change from **{peak_dt.strftime('%d %b %Y')}** to "
-    f"**{trough_dt.strftime('%d %b %Y')}** — the exact period Nifty fell {nifty_ret:.1f}%."
-)
+# Nifty recovery return
+nifty_rec_s = nifty[nifty.index >= trough_dt]
+nifty_rec_e = nifty[nifty.index <= recovery_end]
+nifty_rec_v0 = float(nifty_rec_s.iloc[0]) if not nifty_rec_s.empty else np.nan
+nifty_rec_v1 = float(nifty_rec_e.iloc[-1]) if not nifty_rec_e.empty else np.nan
+nifty_rec_pct = (nifty_rec_v1 - nifty_rec_v0) / nifty_rec_v0 * 100
+
+# Header metrics
+c1, c2, c3, c4 = st.columns(4)
+c1.metric("Peak Date",    peak_dt.strftime("%d %b %Y"))
+c2.metric("Trough Date",  trough_dt.strftime("%d %b %Y"))
+c3.metric("Recovery End", recovery_end.strftime("%d %b %Y"),
+          delta="Full ✅" if is_full else "Partial ⏳")
+c4.metric("Nifty Fall",   f"{nifty_fall:.1f}%")
+
 st.divider()
-
-# Compute returns directly from NAV data
-returns_df = fund_returns_in_window(funds, cat_map, peak_dt, trough_dt)
-
-if returns_df.empty:
-    st.warning("No fund data available for this period.")
-    st.stop()
 
 # Category filter
-all_cats      = sorted(returns_df["Category"].unique())
+all_cats      = sorted(set(cat_map.values()))
 selected_cats = st.sidebar.multiselect("Categories", all_cats, default=all_cats)
-returns_df    = returns_df[returns_df["Category"].isin(selected_cats)]
 
-# Best fund per category summary
-st.subheader("🏆 Best Fund per Category (fell least)")
-best = (returns_df
-        .sort_values("Return", ascending=False)
-        .groupby("Category", sort=False)
-        .first()
-        .reset_index()[["Category", "Fund", "Return"]])
-best["vs Nifty"] = (best["Return"] - nifty_ret).map(lambda x: f"+{x:.1f}%" if x >= 0 else f"{x:.1f}%")
-best["Return"]   = best["Return"].map("{:.1f}%".format)
-st.dataframe(best, use_container_width=True, hide_index=True)
-st.divider()
+# ─────────────────────────────────────────────────────────────
+#  TWO TABS: CRASH  |  RECOVERY
+# ─────────────────────────────────────────────────────────────
 
-# Per-category charts
-st.subheader(f"📊 Top {top_n} Most Resilient Funds per Category")
+tab_crash, tab_rec = st.tabs(["📉 Crash Period", "📈 Recovery Period"])
 
-for cat in sorted(selected_cats):
-    cat_df = (returns_df[returns_df["Category"] == cat]
-              .sort_values("Return", ascending=False)
-              .head(top_n)
-              .sort_values("Return", ascending=True)  # reversed: best at top in Plotly
-              .copy())
-    if cat_df.empty:
-        continue
 
-    total_in_cat = len(returns_df[returns_df["Category"] == cat])
-    beat_nifty   = (returns_df[returns_df["Category"] == cat]["Return"] > nifty_ret).sum()
+# ══════════════  CRASH TAB  ══════════════
+with tab_crash:
+    st.caption(
+        f"Fund NAV change from **{peak_dt.strftime('%d %b %Y')}** (Nifty peak) "
+        f"to **{trough_dt.strftime('%d %b %Y')}** (Nifty trough).  "
+        f"Nifty fell **{nifty_fall:.1f}%** in this period."
+    )
 
-    with st.expander(
-        f"**{cat}**  —  {beat_nifty}/{total_in_cat} funds beat Nifty",
-        expanded=True
-    ):
-        colors = [
-            "#2196f3" if v >= nifty_ret * 0.5
-            else "#66bb6a" if v >= nifty_ret
-            else "#ef9a9a"
-            for v in cat_df["Return"]
-        ]
-        fig = go.Figure()
-        fig.add_trace(go.Bar(
-            x=cat_df["Return"],
-            y=cat_df["Fund"].apply(lambda x: x[:60] + "…" if len(x) > 60 else x),
-            orientation="h",
-            marker_color=colors,
-            text=cat_df["Return"].map("{:.1f}%".format),
-            textposition="outside",
-        ))
-        fig.add_vline(
-            x=nifty_ret,
-            line_dash="dash", line_color="red", line_width=2,
-            annotation_text=f"Nifty {nifty_ret:.1f}%",
-            annotation_font_size=11, annotation_font_color="red",
-        )
-        fig.add_vline(x=0, line_color="#aaa", line_width=1)
-        fig.update_layout(
-            height=max(300, len(cat_df) * 50),
-            template="plotly_dark",
-            margin=dict(l=10, r=90, t=10, b=10),
-            xaxis=dict(ticksuffix="%", title=""),
-            yaxis=dict(title=""),
-            showlegend=False,
-        )
-        st.plotly_chart(fig, use_container_width=True)
+    crash_df = fund_returns_in_window(funds, cat_map, peak_dt, trough_dt)
+    crash_df = crash_df[crash_df["Category"].isin(selected_cats)]
 
-        tbl = cat_df[["Fund", "Return"]].copy().reset_index(drop=True)
-        tbl["vs Nifty"] = (cat_df["Return"].values - nifty_ret)
-        tbl["vs Nifty"] = tbl["vs Nifty"].map(lambda x: f"+{x:.1f}%" if x >= 0 else f"{x:.1f}%")
-        tbl["Return"]   = tbl["Return"].map("{:.1f}%".format)
-        tbl.columns     = ["Fund", "Return in Period", "vs Nifty"]
-        st.dataframe(tbl, use_container_width=True, hide_index=True)
+    if crash_df.empty:
+        st.warning("No fund data for this period.")
+    else:
+        # Best per category
+        best_c = (crash_df.sort_values("Return", ascending=False)
+                  .groupby("Category", sort=False).first()
+                  .reset_index()[["Category", "Fund", "Return"]])
+        best_c["vs Nifty"] = (best_c["Return"] - nifty_fall).map(
+            lambda x: f"+{x:.1f}%" if x >= 0 else f"{x:.1f}%")
+        best_c["Return"] = best_c["Return"].map("{:.1f}%".format)
+        st.subheader("🏆 Best Fund per Category (fell least)")
+        st.dataframe(best_c, use_container_width=True, hide_index=True)
+        st.divider()
+
+        st.subheader(f"Top {top_n} Most Resilient Funds per Category")
+        for cat in sorted(selected_cats):
+            cat_df = crash_df[crash_df["Category"] == cat]
+            if cat_df.empty:
+                continue
+            total     = len(cat_df)
+            beat_n    = (cat_df["Return"] > nifty_fall).sum()
+            fig, tbl  = draw_bar_chart(cat_df, nifty_fall,
+                                       f"Nifty {nifty_fall:.1f}%", top_n, "crash")
+            if fig is None:
+                continue
+            with st.expander(f"**{cat}**  —  {beat_n}/{total} beat Nifty", expanded=True):
+                st.plotly_chart(fig, use_container_width=True)
+                tbl.columns = ["Fund", "Fall in Period", "vs Nifty"]
+                st.dataframe(tbl, use_container_width=True, hide_index=True)
+
+
+# ══════════════  RECOVERY TAB  ══════════════
+with tab_rec:
+    st.caption(
+        f"Fund NAV change from **{trough_dt.strftime('%d %b %Y')}** (Nifty trough) "
+        f"to **{recovery_end.strftime('%d %b %Y')}** ({recovery_label}).  "
+        f"Nifty recovered **{nifty_rec_pct:.1f}%** in this period."
+    )
+
+    rec_df = fund_returns_in_window(funds, cat_map, trough_dt, recovery_end)
+    rec_df = rec_df[rec_df["Category"].isin(selected_cats)]
+
+    if rec_df.empty:
+        st.warning("No fund data for this recovery period.")
+    else:
+        # Best per category
+        best_r = (rec_df.sort_values("Return", ascending=False)
+                  .groupby("Category", sort=False).first()
+                  .reset_index()[["Category", "Fund", "Return"]])
+        best_r["vs Nifty"] = (best_r["Return"] - nifty_rec_pct).map(
+            lambda x: f"+{x:.1f}%" if x >= 0 else f"{x:.1f}%")
+        best_r["Return"] = best_r["Return"].map("{:.1f}%".format)
+        st.subheader("🚀 Best Recovery Fund per Category")
+        st.dataframe(best_r, use_container_width=True, hide_index=True)
+        st.divider()
+
+        st.subheader(f"Top {top_n} Fastest Recovery Funds per Category")
+        for cat in sorted(selected_cats):
+            cat_df  = rec_df[rec_df["Category"] == cat]
+            if cat_df.empty:
+                continue
+            total    = len(cat_df)
+            beat_n   = (cat_df["Return"] > nifty_rec_pct).sum()
+            fig, tbl = draw_bar_chart(cat_df, nifty_rec_pct,
+                                      f"Nifty {nifty_rec_pct:.1f}%", top_n, "recovery")
+            if fig is None:
+                continue
+            with st.expander(f"**{cat}**  —  {beat_n}/{total} beat Nifty recovery", expanded=True):
+                st.plotly_chart(fig, use_container_width=True)
+                tbl.columns = ["Fund", "Recovery Gain", "vs Nifty"]
+                st.dataframe(tbl, use_container_width=True, hide_index=True)
