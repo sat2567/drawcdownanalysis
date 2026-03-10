@@ -297,10 +297,12 @@ def load_data():
 
 # ── Pre-compute all fund × event matrices ─────────────────────
 @st.cache_data
-def build_matrices(_all_funds, _events_df, fixed_days, _last_date):
-    crash_mat   = {}   # fund → {ev_idx: crash_return %}
-    recovery_mat = {}  # fund → {ev_idx: recovery_return %}
-    rec_end_mat  = {}  # fund → {ev_idx: (end_date, is_full)}
+def build_matrices(_all_funds, _events_df, fixed_days, _last_date, _fund_keys=None):
+    # _fund_keys is a tuple of column names — used as an explicit cache key
+    # so switching universe (equity vs sector) always triggers a fresh compute
+    crash_mat    = {}
+    recovery_mat = {}
+    rec_end_mat  = {}
 
     for fund in _all_funds.columns:
         nav = _all_funds[fund]
@@ -308,10 +310,8 @@ def build_matrices(_all_funds, _events_df, fixed_days, _last_date):
         recovery_mat[fund] = {}
         rec_end_mat[fund]  = {}
         for i, ev in _events_df.iterrows():
-            # Crash: peak → trough
             crash_mat[fund][i] = fund_return_window(
                 nav, ev["peak_date"], ev["trough_date"])
-            # Recovery: trough → recovery_end (or fixed window)
             ret, end_d, is_full = fund_recovery(
                 nav, ev["trough_date"], ev["recovery_date"],
                 fixed_days, _last_date)
@@ -407,7 +407,8 @@ if events_df.empty:
 
 # ── Build matrices ────────────────────────────────────────────
 crash_mat, recovery_mat, rec_end_mat = build_matrices(
-    all_funds, events_df, fixed_days, last_date)
+    all_funds, events_df, fixed_days, last_date,
+    _fund_keys=tuple(all_funds.columns))
 
 # ── Aggregate averages ────────────────────────────────────────
 avg_crash = {}
@@ -439,7 +440,7 @@ c1, c2, c3, c4, c5 = st.columns(5)
 c1.metric("📅 Period",
           f"{nifty.index.min().strftime('%b %Y')} – {last_date.strftime('%b %Y')}",
           delta=f"{years_back} yr{'s' if years_back>1 else ''}")
-c2.metric("📊 Funds", len(all_funds.columns))
+c2.metric("📊 Funds", f"{len(all_funds.columns)} ({fund_type.replace(' Funds Only','').replace('All ','All')})")
 c3.metric(f"⚡ Crashes ≥ {threshold}%", len(events_df))
 c4.metric("📉 Worst Crash", f"{events_df['nifty_fall'].min():.1f}%")
 fully = events_df["recovery_date"].notna().sum()
