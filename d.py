@@ -376,27 +376,28 @@ fixed_days = st.sidebar.slider(
 st.sidebar.markdown("### 🎛️ Display")
 top_n = st.sidebar.slider("Top N funds per category", 3, 15, 5)
 
-# Fund universe toggle
+# Fund universe toggle — drives which funds AND categories are active
 fund_type = st.sidebar.radio(
     "Fund universe",
     ["All Funds", "Equity Funds Only", "Sector Funds Only"],
     index=0,
-    help="Equity = diversified funds (Large Cap, Mid Cap, Flexi Cap etc.)  |  Sector = thematic funds (Banking, Pharma, Tech etc.)"
+    help="Equity = diversified (Large Cap, Flexi Cap…)  |  Sector = thematic (Banking, Pharma, Tech…)"
 )
 
-# Build category list based on universe selection
-equity_cats = sorted({v for k,v in category_map.items() if fund_universe.get(k)=="Equity"})
-sector_cats = sorted({v for k,v in category_map.items() if fund_universe.get(k)=="Sector"})
-all_cats    = sorted(set(category_map.values()))
-
+# Filter all_funds and category_map to selected universe FIRST
 if fund_type == "Equity Funds Only":
-    default_cats = equity_cats
+    active_funds = [f for f in all_funds.columns if fund_universe.get(f) == "Equity"]
 elif fund_type == "Sector Funds Only":
-    default_cats = sector_cats
+    active_funds = [f for f in all_funds.columns if fund_universe.get(f) == "Sector"]
 else:
-    default_cats = all_cats
+    active_funds = list(all_funds.columns)
 
-selected_cats = st.sidebar.multiselect("Filter categories", all_cats, default=default_cats)
+all_funds = all_funds[active_funds]
+
+# Now derive categories from active funds only
+all_cats      = sorted({category_map[f] for f in active_funds})
+selected_cats = st.sidebar.multiselect("Filter categories", all_cats, default=all_cats,
+                                        key=f"cats_{fund_type}")
 
 # ── Find crash events ─────────────────────────────────────────
 events_df = find_crash_events(nifty, threshold)
