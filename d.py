@@ -678,7 +678,7 @@ with tab5:
         if cat_filter != "All" and cat != cat_filter: continue
         row = {"_cat": cat, "_fund": fund, "_is_nifty": False}
         for i, ev in events_df.iterrows():
-            row[i] = crash_mat[fund][i] if is_crash else recovery_mat[fund][i]
+            row[i] = crash_mat.get(fund, {}).get(i, np.nan) if is_crash else recovery_mat.get(fund, {}).get(i, np.nan)
         records.append(row)
 
     # Sort by category then by avg performance
@@ -891,7 +891,7 @@ with tab5:
             total = 0
             for i in ev_indices:
                 nv = nifty_row_vals.get(i, np.nan)
-                fv = crash_mat[fund][i] if is_crash else recovery_mat[fund][i]
+                fv = crash_mat.get(fund, {}).get(i, np.nan) if is_crash else recovery_mat.get(fund, {}).get(i, np.nan)
                 if not np.isnan(nv) and not np.isnan(fv):
                     total += 1
                     if is_crash and fv > nv: beats += 1
