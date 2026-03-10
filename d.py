@@ -751,45 +751,134 @@ with tab4:
 # ─── TAB 5 — Full Heatmap ─────────────────────────────────────
 with tab5:
     st.subheader("🗂️ Complete Heatmap — Crash + Recovery for Every Fund × Every Event")
+    st.markdown(
+        "Each cell shows the fund's % return during that event window. "
+        "The **Nifty50 row** is pinned at the top of the table as a benchmark reference."
+    )
 
-    view_mode  = st.radio("Show", ["📉 Crash Returns", "📈 Recovery Returns"],
-                           horizontal=True, key="hm_mode")
-    cat_filter = st.selectbox("Filter category", ["All"] + sorted(selected_cats),
-                               key="hm_cat")
+    col_vm, col_cf = st.columns([1, 1])
+    with col_vm:
+        view_mode = st.radio("Show", ["📉 Crash Returns", "📈 Recovery Returns"],
+                             horizontal=True, key="hm_mode")
+    with col_cf:
+        cat_filter = st.selectbox("Filter category", ["All"] + sorted(selected_cats),
+                                  key="hm_cat")
 
+    is_crash = "Crash" in view_mode
+
+    # ── Build Nifty reference values ──────────────────────────
+    nifty_row_vals = {}
+    for i, ev in events_df.iterrows():
+        if is_crash:
+            nifty_row_vals[i] = ev["nifty_fall"]
+        else:
+            nr = nifty_rec_refs.get(i, np.nan)
+            nifty_row_vals[i] = nr
+
+    # ── Build fund rows ───────────────────────────────────────
     records = []
     for fund in all_funds.columns:
         cat = category_map[fund]
         if cat not in selected_cats: continue
         if cat_filter != "All" and cat != cat_filter: continue
-        row = {"Category": cat, "Fund": fund}
+        row = {"_cat": cat, "_fund": fund, "_is_nifty": False}
         for i, ev in events_df.iterrows():
-            ev_lbl = f"Ev{i+1} {ev['peak_date'].strftime('%b%y')}"
-            if "Crash" in view_mode:
-                row[ev_lbl] = crash_mat[fund][i]
-            else:
-                row[ev_lbl] = recovery_mat[fund][i]
+            row[i] = crash_mat[fund][i] if is_crash else recovery_mat[fund][i]
         records.append(row)
 
-    matrix_df = pd.DataFrame(records)
-    ev_cols   = [c for c in matrix_df.columns if c.startswith("Ev")]
+    # Sort by category then by avg performance
+    records.sort(key=lambda r: (
+        r["_cat"],
+        -np.nanmean([v for k,v in r.items()
+                     if isinstance(k, int) and not np.isnan(float(v)) if v is not None])
+    ))
 
-    is_crash = "Crash" in view_mode
-    th = ("style='padding:5px 8px;background:#1a3a5c;color:white;"
-          "font-size:10px;white-space:nowrap;text-align:center;"
-          "position:sticky;top:0;z-index:2'")
-    td_lbl = "style='padding:4px 8px;font-size:11px;white-space:nowrap;background:#f5f5f5'"
+    # ── Column header labels ──────────────────────────────────
+    ev_indices = list(events_df.index)
 
-    hdr = f"<th {th}>Category</th><th {th}>Fund</th>"
-    for col in ev_cols:
-        hdr += f"<th {th}>{col}</th>"
+    # ── CSS constants ─────────────────────────────────────────
+    # Header row style
+    TH_BASE  = ("padding:7px 10px;font-size:11px;white-space:nowrap;"
+                "text-align:center;position:sticky;top:0;z-index:3;")
+    TH_DARK  = f"style='{TH_BASE}background:#1a3a5c;color:#ffffff;'"
+    TH_EVENT = f"style='{TH_BASE}background:#1a3a5c;color:#ffffff;'"
 
+    # Category/Fund cell — dark background, white text, always readable
+    TD_CAT   = ("style='padding:5px 10px;font-size:11px;font-weight:700;"
+                "white-space:nowrap;background:#2c3e50;color:#ffffff;"
+                "border-right:1px solid #4a5568;'")
+    TD_FUND  = ("style='padding:5px 10px;font-size:11px;"
+                "white-space:nowrap;background:#f8f9fa;color:#1a1a2e;"
+                "border-right:2px solid #dee2e6;max-width:240px;'")
+
+    # Nifty benchmark row
+    TD_NIFTY_CAT  = ("style='padding:6px 10px;font-size:11px;font-weight:700;"
+                     "white-space:nowrap;background:#7f1d1d;color:#ffffff;"
+                     "border-right:1px solid #991b1b;position:sticky;top:28px;z-index:2;'")
+    TD_NIFTY_FUND = ("style='padding:6px 10px;font-size:12px;font-weight:700;"
+                     "white-space:nowrap;background:#7f1d1d;color:#ffffff;"
+                     "border-right:2px solid #991b1b;position:sticky;top:28px;z-index:2;'")
+
+    # ── Build header ──────────────────────────────────────────
+    hdr = f"<th {TH_DARK}>Category</th><th {TH_DARK}>Fund Name</th>"
+    for i, ev in events_df.iterrows():
+        crash_str = f"▼ {abs(ev['nifty_fall']):.1f}%"
+        date_str  = (f"Ev{i+1}<br>"
+                     f"{ev['peak_date'].strftime('%d %b %y')} →<br>"
+                     f"{ev['trough_date'].strftime('%d %b %y')}<br>"
+                     f"<span style='color:#fca5a5;font-weight:700'>{crash_str}</span>")
+        hdr += f"<th {TH_EVENT}>{date_str}</th>"
+
+    # ── Build Nifty benchmark row (pinned second row) ─────────
+    nifty_cells = f"<td {TD_NIFTY_CAT}>📊 BENCHMARK</td>"
+    nifty_cells += f"<td {TD_NIFTY_FUND}>Nifty 50</td>"
+    for i in ev_indices:
+        val = nifty_row_vals.get(i, np.nan)
+        if is_crash:
+            bg, fg = dd_to_hex(val)
+        else:
+            bg, fg = rec_to_hex(val)
+        txt = f"{float(val):.1f}%" if (val is not None and isinstance(val, float) and not np.isnan(val)) else "–"
+        nifty_cells += (
+            f"<td style='background:{bg};color:{fg};"
+            f"padding:6px 8px;text-align:center;font-size:12px;"
+            f"font-weight:700;border:1px solid rgba(255,255,255,0.2);"
+            f"position:sticky;top:28px;z-index:2'>{txt}</td>"
+        )
+    nifty_row_html = f"<tr>{nifty_cells}</tr>"
+
+    # ── Build fund rows ───────────────────────────────────────
     body = ""
-    for _, row in matrix_df.iterrows():
-        cells  = f"<td {td_lbl}><b>{row['Category']}</b></td>"
-        cells += f"<td {td_lbl}>{row['Fund']}</td>"
-        for col in ev_cols:
-            val = row[col]
+    prev_cat = None
+    for ridx, row in enumerate(records):
+        cat  = row["_cat"]
+        fund = row["_fund"]
+
+        # Category label cell — new category gets accent background
+        cat_changed = cat != prev_cat
+        if cat_changed:
+            cat_bg   = "#2c3e50"
+            cat_text = f"<b>{cat}</b>"
+            prev_cat = cat
+        else:
+            cat_bg   = "#3d5166"
+            cat_text = ""   # blank for same-category rows to reduce visual noise
+
+        td_cat_dyn = (f"style='padding:5px 10px;font-size:11px;font-weight:700;"
+                      f"white-space:nowrap;background:{cat_bg};color:#ffffff;"
+                      f"border-right:1px solid #4a5568;'")
+
+        # Fund name — alternate row shading
+        row_bg   = "#ffffff" if ridx % 2 == 0 else "#f0f4f8"
+        td_fund_dyn = (f"style='padding:5px 10px;font-size:11px;"
+                       f"white-space:nowrap;background:{row_bg};color:#1a1a2e;"
+                       f"border-right:2px solid #dee2e6;'")
+
+        cells  = f"<td {td_cat_dyn}>{cat_text}</td>"
+        cells += f"<td {td_fund_dyn}>{fund}</td>"
+
+        for i in ev_indices:
+            val = row.get(i)
             if is_crash:
                 bg, fg = dd_to_hex(val)
             else:
@@ -797,31 +886,112 @@ with tab5:
             txt = (f"{float(val):.1f}%"
                    if (val is not None and isinstance(val, float) and not np.isnan(val))
                    else "–")
+            # Show outperformance vs Nifty as a small badge
+            nifty_val = nifty_row_vals.get(i, np.nan)
+            badge = ""
+            if (val is not None and isinstance(val, float) and not np.isnan(val)
+                    and not np.isnan(nifty_val)):
+                diff = val - nifty_val
+                if is_crash:
+                    # Crash: fund diff > 0 means fund fell LESS than Nifty = good
+                    if diff > 1.0:
+                        badge = f"<br><span style='font-size:9px;color:#86efac'>▲{diff:.1f}%</span>"
+                    elif diff < -1.0:
+                        badge = f"<br><span style='font-size:9px;color:#fca5a5'>▼{abs(diff):.1f}%</span>"
+                else:
+                    # Recovery: fund diff > 0 means fund recovered MORE than Nifty = good
+                    if diff > 1.0:
+                        badge = f"<br><span style='font-size:9px;color:#86efac'>+{diff:.1f}%</span>"
+                    elif diff < -1.0:
+                        badge = f"<br><span style='font-size:9px;color:#fca5a5'>{diff:.1f}%</span>"
+
             cells += (f"<td style='background:{bg};color:{fg};"
-                      f"padding:5px 7px;text-align:center;font-size:11px'>{txt}</td>")
+                      f"padding:5px 7px;text-align:center;font-size:11px;"
+                      f"border:1px solid rgba(0,0,0,0.05)'>{txt}{badge}</td>")
         body += f"<tr>{cells}</tr>"
 
+    # ── Legend ────────────────────────────────────────────────
+    if is_crash:
+        legend_html = """
+        <div style='display:flex;gap:16px;padding:8px 12px;background:#f8f9fa;
+                     border-top:1px solid #dee2e6;font-size:11px;flex-wrap:wrap'>
+          <span>🟢 <b>Green</b> = small loss (resilient)</span>
+          <span>🔴 <b>Red</b> = large loss</span>
+          <span style='color:#86efac;font-weight:700'>▲X%</span> = outperformed Nifty by X%
+          <span style='color:#fca5a5;font-weight:700'>▼X%</span> = underperformed Nifty by X%
+        </div>"""
+    else:
+        legend_html = """
+        <div style='display:flex;gap:16px;padding:8px 12px;background:#f8f9fa;
+                     border-top:1px solid #dee2e6;font-size:11px;flex-wrap:wrap'>
+          <span>🟢 <b>Dark green</b> = strong recovery</span>
+          <span>🟡 <b>Yellow</b> = weak recovery</span>
+          <span style='color:#86efac;font-weight:700'>+X%</span> = recovered more than Nifty
+          <span style='color:#fca5a5;font-weight:700'>-X%</span> = recovered less than Nifty
+        </div>"""
+
     st.html(f"""
-    <div style='overflow:auto;max-height:560px;border:1px solid #ddd;
-                border-radius:6px;font-family:sans-serif'>
+    <div style='overflow:auto;max-height:600px;border:1px solid #dee2e6;
+                border-radius:8px;font-family:-apple-system,BlinkMacSystemFont,sans-serif;
+                box-shadow:0 2px 8px rgba(0,0,0,0.08)'>
       <table style='border-collapse:collapse;width:100%'>
-        <thead><tr>{hdr}</tr></thead>
-        <tbody>{body}</tbody>
+        <thead>
+          <tr>{hdr}</tr>
+        </thead>
+        <tbody>
+          {nifty_row_html}
+          {body}
+        </tbody>
       </table>
+      {legend_html}
     </div>""")
 
-    # Nifty reference row
+    # ── Summary stats below heatmap ───────────────────────────
     st.markdown("---")
-    st.markdown("**📌 Nifty reference per event:**")
-    ref = {"Metric": "Nifty50"}
-    for i, ev in events_df.iterrows():
-        lbl = f"Ev{i+1} {ev['peak_date'].strftime('%b%y')}"
-        if is_crash:
-            ref[lbl] = f"{ev['nifty_fall']:.1f}%"
-        else:
-            nr = nifty_rec_refs.get(i, np.nan)
-            ref[lbl] = f"{nr:.1f}%" if not np.isnan(nr) else "–"
-    st.dataframe(pd.DataFrame([ref]), use_container_width=True, hide_index=True)
+    col_s1, col_s2 = st.columns(2)
+    with col_s1:
+        st.markdown("**📌 Nifty50 reference values per event:**")
+        ref_rows = []
+        for i, ev in events_df.iterrows():
+            crash_val = ev["nifty_fall"]
+            rec_val   = nifty_rec_refs.get(i, np.nan)
+            ref_rows.append({
+                "Event"        : f"Ev{i+1}",
+                "Period"       : f"{ev['peak_date'].strftime('%d %b %Y')} → {ev['trough_date'].strftime('%d %b %Y')}",
+                "Nifty Crash %" : f"{crash_val:.2f}%",
+                "Nifty Recovery %": f"{rec_val:.2f}%" if not np.isnan(rec_val) else "In progress",
+            })
+        st.dataframe(pd.DataFrame(ref_rows), use_container_width=True, hide_index=True)
+    with col_s2:
+        st.markdown("**🏅 Funds that beat Nifty in most events:**")
+        beat_counts = []
+        for fund in all_funds.columns:
+            if category_map[fund] not in selected_cats: continue
+            if cat_filter != "All" and category_map[fund] != cat_filter: continue
+            beats = 0
+            total = 0
+            for i in ev_indices:
+                nv = nifty_row_vals.get(i, np.nan)
+                fv = crash_mat[fund][i] if is_crash else recovery_mat[fund][i]
+                if not np.isnan(nv) and not np.isnan(fv):
+                    total += 1
+                    if is_crash and fv > nv: beats += 1
+                    elif not is_crash and fv > nv: beats += 1
+            if total > 0:
+                beat_counts.append({
+                    "Fund"    : fund,
+                    "Category": category_map[fund],
+                    "Beat Nifty": f"{beats}/{total} events",
+                    "Hit Rate": beats/total
+                })
+        if beat_counts:
+            bc_df = (pd.DataFrame(beat_counts)
+                     .sort_values("Hit Rate", ascending=False)
+                     .head(10)
+                     .reset_index(drop=True))
+            bc_df["Hit Rate"] = bc_df["Hit Rate"].map("{:.0%}".format)
+            bc_df = bc_df.drop(columns=["Hit Rate"])
+            st.dataframe(bc_df, use_container_width=True, hide_index=True)
 
 st.divider()
 st.caption(
