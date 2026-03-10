@@ -29,10 +29,11 @@ def load_all_data():
             data[col] = pd.to_numeric(data[col], errors="coerce")
         return data
 
-    f1  = parse_excel("funds1.xlsx")
-    f2  = parse_excel("funds2.xlsx")
-    sec = parse_excel("sectorfunds.xlsx")
-    funds = pd.concat([f1, f2, sec], axis=1, sort=True)
+    f1       = parse_excel("funds1.xlsx")
+    f2       = parse_excel("funds2.xlsx")
+    sec      = parse_excel("sectorfunds.xlsx")
+    multiasset = parse_excel("multiasset.xlsx")
+    funds = pd.concat([f1, f2, sec, multiasset], axis=1, sort=True)
 
     def classify(name):
         n = name.lower()
@@ -49,14 +50,16 @@ def load_all_data():
         if any(x in n for x in ["consum", "fmcg", "retail"]): return "Consumption"
         if any(x in n for x in ["energy", "power", "resource", "oil", "gas"]): return "Energy"
         if any(x in n for x in ["auto", "mobil", "transport"]): return "Automotive"
+        if "multi asset" in n or "multi-asset" in n or "multiasset" in n: return "Multi Asset"
         return "Other"
 
     cat_map  = {col: classify(col) for col in funds.columns}
     # Track equity vs sector so UI can treat them differently
     type_map = {}
-    for col in f1.columns:  type_map[col] = "Equity"
-    for col in f2.columns:  type_map[col] = "Equity"
-    for col in sec.columns: type_map[col] = "Sector"
+    for col in f1.columns:         type_map[col] = "Equity"
+    for col in f2.columns:         type_map[col] = "Equity"
+    for col in sec.columns:        type_map[col] = "Sector"
+    for col in multiasset.columns: type_map[col] = "MultiAsset"
     return nifty, funds, cat_map, type_map
 
 
@@ -292,7 +295,7 @@ st.divider()
 # ─────────────────────────────────────────────────────────────
 
 EQUITY_CATS = {"Flexi Cap", "Small Cap", "Multi Cap", "Large & Mid Cap",
-               "Large Cap", "Mid Cap"}
+               "Large Cap", "Mid Cap", "Multi Asset"}
 SECTOR_CATS = {"Banking & Finance", "Pharma & Healthcare", "Technology",
                "Infrastructure", "Consumption", "Energy", "Automotive", "Other"}
 
