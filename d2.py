@@ -131,11 +131,15 @@ def find_crashes(nifty, threshold):
 #  FUND RETURNS IN A WINDOW — direct NAV lookup
 # ─────────────────────────────────────────────────────────────
 
-def fund_returns_in_window(funds, cat_map, start_date, end_date, max_gap_days=7):
+def fund_returns_in_window(funds, cat_map, start_date, end_date, max_gap_days=7, use_fund_peak=False):
     """
     % change in fund NAV from start_date to end_date.
     Excludes funds whose NAV starts more than max_gap_days after start_date
     or ends more than max_gap_days before end_date (incomplete period data).
+
+    use_fund_peak: if True, use the fund's own maximum NAV in the window
+                   [start_date, end_date] as v0 instead of the NAV on start_date.
+                   This corrects for funds that peaked after the Nifty peak date.
     """
     rows = []
     for fund in funds.columns:
@@ -150,7 +154,13 @@ def fund_returns_in_window(funds, cat_map, start_date, end_date, max_gap_days=7)
         # Fund data ended too early — missed the end of the period
         if (end_date - e.index[-1]).days > max_gap_days:
             continue
-        v0 = float(s.iloc[0])
+        # NAV in full window
+        window_nav = nav[(nav.index >= start_date) & (nav.index <= end_date)]
+        if use_fund_peak:
+            # Use the fund's own peak within the crash window
+            v0 = float(window_nav.max())
+        else:
+            v0 = float(s.iloc[0])
         v1 = float(e.iloc[-1])
         if v0 <= 0 or np.isnan(v0) or np.isnan(v1):
             continue
@@ -240,6 +250,12 @@ with st.spinner("Loading data…"):
 # Sidebar
 threshold = st.sidebar.slider("Nifty crash threshold (%)", 5.0, 40.0, 15.0, 1.0)
 top_n     = st.sidebar.slider("Top N funds shown per category", 3, 20, 10)
+use_fund_peak = st.sidebar.toggle(
+    "Use fund's own peak (crash tab)",
+    value=True,
+    help="ON: measures fall from the fund's own highest NAV within the crash window (more accurate). "
+         "OFF: measures from Nifty's peak date NAV."
+)
 
 crashes = find_crashes(nifty, threshold)
 
@@ -419,7 +435,7 @@ with tab_crash:
         f"to **{trough_dt.strftime('%d %b %Y')}** (Nifty trough).  "
         f"Nifty fell **{nifty_fall:.1f}%** in this period."
     )
-    crash_df = fund_returns_in_window(funds, cat_map, peak_dt, trough_dt)
+    crash_df = fund_returns_in_window(funds, cat_map, peak_dt, trough_dt, use_fund_peak=use_fund_peak)
     if crash_df.empty:
         st.warning("No fund data for this period.")
     else:
