@@ -421,8 +421,10 @@ for i, ev in events_df.iterrows():
 avg_nifty_rec   = np.nanmean(list(nifty_rec_refs.values()))
 
 # ── Averages ──────────────────────────────────────────────────
-avg_crash = {}
-avg_rec   = {}
+avg_crash  = {}
+avg_rec    = {}
+n_crash_ev = {}   # how many events each fund participated in (crash)
+n_rec_ev   = {}   # how many events each fund participated in (recovery)
 ev_indices = list(events_df.index)
 for fund in all_funds.columns:
     if fund not in crash_mat: continue
@@ -430,13 +432,19 @@ for fund in all_funds.columns:
     r_vals = [recovery_mat[fund].get(i, np.nan) for i in ev_indices]
     c_vals = [v for v in c_vals if isinstance(v, float) and not np.isnan(v)]
     r_vals = [v for v in r_vals if isinstance(v, float) and not np.isnan(v)]
-    if c_vals: avg_crash[fund] = np.mean(c_vals)
-    if r_vals: avg_rec[fund]   = np.mean(r_vals)
+    if c_vals:
+        avg_crash[fund]  = np.mean(c_vals)
+        n_crash_ev[fund] = len(c_vals)
+    if r_vals:
+        avg_rec[fund]   = np.mean(r_vals)
+        n_rec_ev[fund]  = len(r_vals)
 
 summary_df = pd.DataFrame({
     "Fund"            : list(avg_crash.keys()),
     "Avg Crash (%)"   : list(avg_crash.values()),
-    "Avg Recovery (%)": [avg_rec.get(f, np.nan) for f in avg_crash.keys()],
+    "Avg Recovery (%)": [avg_rec.get(f, np.nan)    for f in avg_crash.keys()],
+    "N Crash Events"  : [n_crash_ev.get(f, 0)      for f in avg_crash.keys()],
+    "N Rec Events"    : [n_rec_ev.get(f, 0)         for f in avg_crash.keys()],
 })
 summary_df["Category"] = summary_df["Fund"].map(category_map)
 summary_df = summary_df[summary_df["Category"].isin(selected_cats)]
@@ -449,6 +457,27 @@ c1.metric("📅 Period",
 c2.metric("📊 Funds", len(all_funds.columns))
 c3.metric(f"⚡ Crashes ≥ {threshold}%", len(events_df))
 c4.metric("📉 Worst Nifty Crash", f"{events_df['nifty_fall'].min():.1f}%")
+
+# ── Reliability warning when too few events ─────────────────
+n_events = len(events_df)
+if n_events == 0:
+    st.error("No crash events found. Lower the threshold or increase the years.")
+    st.stop()
+elif n_events == 1:
+    st.warning(
+        f"⚠️ **Only 1 crash event detected** with these settings "
+        f"({threshold}% threshold, {years_back} years).  \n"
+        "The averages shown are based on a **single event** — rankings will be heavily skewed "
+        "by how each fund happened to perform in just that one crash.  \n"
+        "**Recommendation:** increase the history window or lower the crash threshold "
+        "to get at least 3 events for reliable comparisons."
+    )
+elif n_events == 2:
+    st.warning(
+        "⚠️ **Only 2 crash events detected** with these settings.  \n"
+        "Averages based on 2 events can still be misleading. "
+        "Consider increasing years or lowering the threshold for more reliable rankings."
+    )
 
 # Crash events summary — compact expander instead of full tab
 with st.expander(f"📆 View crash events ({len(events_df)} detected)", expanded=False):
@@ -479,109 +508,186 @@ tab_crash, tab_rec, tab_heat, tab_guide = st.tabs([
 
 # ─── TAB: Drawdown Rankings ───────────────────────────────────
 with tab_crash:
-    st.caption(
-        f"Average % fall per fund from Nifty peak → trough across all {len(events_df)} crash events. "
-        f"Closer to 0 = fell least.  Red line = Nifty avg ({avg_nifty_crash:.1f}%)."
-    )
+
+    # ── Event selector ────────────────────────────────────────
+    ev_labels = [
+        f"Ev{i+1}: {ev['peak_date'].strftime('%d %b %Y')} → {ev['trough_date'].strftime('%d %b %Y')}  (Nifty {ev['nifty_fall']:.1f}%)"
+        for i, ev in events_df.iterrows()
+    ]
+    if len(events_df) == 1:
+        selected_ev_label = ev_labels[0]
+        st.info(f"📌 Only 1 crash event in this period: **{ev_labels[0]}**")
+    else:
+        ev_options = ["📊 Average across all events"] + ev_labels
+        selected_ev_label = st.selectbox(
+            "View crash returns for:", ev_options, index=0, key="crash_ev_sel"
+        )
+
+    use_avg_crash = selected_ev_label.startswith("📊")
+
+    # Resolve which event index and nifty reference to use
+    if use_avg_crash:
+        crash_ref   = avg_nifty_crash
+        crash_label = f"Nifty avg {avg_nifty_crash:.1f}%"
+        val_col     = "Avg Crash (%)"
+        def get_crash_val(fund): return avg_crash.get(fund, np.nan)
+    else:
+        sel_ev_idx  = ev_labels.index(selected_ev_label)
+        sel_ev      = events_df.iloc[sel_ev_idx]
+        crash_ref   = sel_ev["nifty_fall"]
+        crash_label = f"Nifty {crash_ref:.1f}%"
+        val_col     = "Crash (%)"
+        def get_crash_val(fund):
+            return crash_mat.get(fund, {}).get(sel_ev_idx, np.nan)
+
+    # ── Build per-event summary_df if needed ─────────────────
+    if use_avg_crash:
+        disp_df = summary_df.copy()
+        disp_df["_val"] = disp_df["Fund"].map(lambda f: avg_crash.get(f, np.nan))
+    else:
+        rows = []
+        for fund in all_funds.columns:
+            cat = category_map.get(fund)
+            if cat not in selected_cats: continue
+            val = crash_mat.get(fund, {}).get(sel_ev_idx, np.nan)
+            if not np.isnan(val):
+                rows.append({"Fund": fund, "Category": cat, "_val": val})
+        disp_df = pd.DataFrame(rows)
 
     # ── Best-fund summary cards ───────────────────────────────
-    st.markdown("##### 🏆 Most Resilient Fund per Category")
-    best_crash = (summary_df.dropna(subset=["Avg Crash (%)"])
-                  .sort_values("Avg Crash (%)", ascending=False)
-                  .groupby("Category", sort=False).first().reset_index())
-    st.html(render_summary_cards(best_crash, "Avg Crash (%)", "crash"))
+    if not disp_df.empty:
+        st.markdown("##### 🏆 Most Resilient Fund per Category")
+        best_crash_disp = (disp_df.dropna(subset=["_val"])
+                      .sort_values("_val", ascending=False)
+                      .groupby("Category", sort=False).first().reset_index())
+        best_crash_disp = best_crash_disp.rename(columns={"_val": "Avg Crash (%)"})
+        st.html(render_summary_cards(best_crash_disp, "Avg Crash (%)", "crash"))
     st.divider()
 
     for cat in sorted(selected_cats):
-        cat_df = (summary_df[summary_df["Category"] == cat]
-                  .sort_values("Avg Crash (%)", ascending=False)
-                  .head(top_n).copy())
-        if cat_df.empty: continue
+        cat_sub = disp_df[disp_df["Category"] == cat].copy() if not disp_df.empty else pd.DataFrame()
+        if cat_sub.empty: continue
+        cat_sub = (cat_sub.sort_values("_val", ascending=False)   # best first
+                         .head(top_n)
+                         .sort_values("_val", ascending=True)     # reverse for Plotly
+                         .copy())
 
-        with st.expander(f"**{cat}**", expanded=True):
+        nifty_ref = crash_ref
+        with st.expander(f"**{cat}** — top {top_n} most resilient (best at top)", expanded=True):
             bar_col = ["#00897b" if v >= -threshold
-                       else "#66bb6a" if v >= avg_nifty_crash
+                       else "#66bb6a" if v >= nifty_ref
                        else "#ef9a9a"
-                       for v in cat_df["Avg Crash (%)"]]
+                       for v in cat_sub["_val"]]
             fig_b = go.Figure()
             fig_b.add_trace(go.Bar(
-                x=cat_df["Avg Crash (%)"],
-                y=cat_df["Fund"].apply(lambda x: x[:55]+"…" if len(x)>55 else x),
+                x=cat_sub["_val"],
+                y=cat_sub["Fund"].apply(lambda x: x[:55]+"…" if len(x)>55 else x),
                 orientation="h", marker_color=bar_col,
-                text=cat_df["Avg Crash (%)"].map("{:.1f}%".format),
+                text=cat_sub["_val"].map("{:.1f}%".format),
                 textposition="outside"))
-            fig_b.add_vline(x=avg_nifty_crash, line_dash="dash", line_color="#e53935",
-                            annotation_text=f"Nifty avg {avg_nifty_crash:.1f}%",
-                            annotation_font_size=10)
+            fig_b.add_vline(x=nifty_ref, line_dash="dash", line_color="#e53935",
+                            annotation_text=crash_label, annotation_font_size=10)
             fig_b.add_vline(x=0, line_color="#ccc", line_width=1)
             fig_b.update_layout(
-                height=max(260, top_n * 52),
-                template="plotly_white",
+                height=max(260, top_n * 52), template="plotly_white",
                 margin=dict(l=10, r=60, t=10, b=10),
-                xaxis=dict(ticksuffix="%", title=""),
-                yaxis=dict(title=""),
+                xaxis=dict(ticksuffix="%", title=""), yaxis=dict(title=""),
                 showlegend=False)
             st.plotly_chart(fig_b, use_container_width=True)
 
-            # Simple table: fund | avg crash | vs nifty
-            tbl = cat_df[["Fund", "Avg Crash (%)"]].copy().reset_index(drop=True)
-            tbl["vs Nifty"] = (cat_df["Avg Crash (%)"].values - avg_nifty_crash)
-            tbl["vs Nifty"] = tbl["vs Nifty"].map(
-                lambda x: f"+{x:.1f}%" if x >= 0 else f"{x:.1f}%")
-            tbl["Avg Crash (%)"] = tbl["Avg Crash (%)"].map("{:.1f}%".format)
+            tbl = cat_sub[["Fund", "_val"]].copy().reset_index(drop=True)
+            tbl["vs Nifty"] = (cat_sub["_val"].values - nifty_ref)
+            tbl["vs Nifty"] = tbl["vs Nifty"].map(lambda x: f"+{x:.1f}%" if x >= 0 else f"{x:.1f}%")
+            tbl["_val"]     = tbl["_val"].map("{:.1f}%".format)
+            tbl.columns     = ["Fund", "Crash Return", "vs Nifty"]
             st.dataframe(tbl, use_container_width=True, hide_index=True)
 
 
 # ─── TAB: Recovery Rankings ───────────────────────────────────
 with tab_rec:
-    st.caption(
-        f"Average % gain from Nifty trough → recovery date across all {len(events_df)} events. "
-        f"Higher = stronger bounce.  Blue line = Nifty avg ({avg_nifty_rec:.1f}%)."
-    )
+
+    # ── Event selector ────────────────────────────────────────
+    if len(events_df) == 1:
+        selected_rev_label = ev_labels[0]
+        st.info(f"📌 Only 1 crash event in this period: **{ev_labels[0]}**")
+    else:
+        rev_options = ["📊 Average across all events"] + ev_labels
+        selected_rev_label = st.selectbox(
+            "View recovery returns for:", rev_options, index=0, key="rec_ev_sel"
+        )
+
+    use_avg_rec = selected_rev_label.startswith("📊")
+
+    if use_avg_rec:
+        rec_ref   = avg_nifty_rec
+        rec_label = f"Nifty avg {avg_nifty_rec:.1f}%"
+        def get_rec_val(fund): return avg_rec.get(fund, np.nan)
+    else:
+        rev_ev_idx = ev_labels.index(selected_rev_label)
+        rev_ev     = events_df.iloc[rev_ev_idx]
+        rec_ref    = nifty_rec_refs.get(rev_ev_idx, np.nan)
+        rec_label  = f"Nifty {rec_ref:.1f}%" if not np.isnan(rec_ref) else "Nifty (incomplete)"
+        def get_rec_val(fund):
+            return recovery_mat.get(fund, {}).get(rev_ev_idx, np.nan)
+
+    # ── Build per-event display df ────────────────────────────
+    if use_avg_rec:
+        rec_disp_df = summary_df.copy()
+        rec_disp_df["_val"] = rec_disp_df["Fund"].map(lambda f: avg_rec.get(f, np.nan))
+    else:
+        rows = []
+        for fund in all_funds.columns:
+            cat = category_map.get(fund)
+            if cat not in selected_cats: continue
+            val = recovery_mat.get(fund, {}).get(rev_ev_idx, np.nan)
+            if not np.isnan(val):
+                rows.append({"Fund": fund, "Category": cat, "_val": val})
+        rec_disp_df = pd.DataFrame(rows)
 
     # ── Best-fund summary cards ───────────────────────────────
-    st.markdown("##### 🚀 Fastest Recovery Fund per Category")
-    best_rec = (summary_df.dropna(subset=["Avg Recovery (%)"])
-                .sort_values("Avg Recovery (%)", ascending=False)
-                .groupby("Category", sort=False).first().reset_index())
-    st.html(render_summary_cards(best_rec, "Avg Recovery (%)", "rec"))
+    if not rec_disp_df.empty:
+        st.markdown("##### 🚀 Fastest Recovery Fund per Category")
+        best_rec_disp = (rec_disp_df.dropna(subset=["_val"])
+                    .sort_values("_val", ascending=False)
+                    .groupby("Category", sort=False).first().reset_index())
+        best_rec_disp = best_rec_disp.rename(columns={"_val": "Avg Recovery (%)"})
+        st.html(render_summary_cards(best_rec_disp, "Avg Recovery (%)", "rec"))
     st.divider()
 
     for cat in sorted(selected_cats):
-        cat_df = (summary_df[summary_df["Category"] == cat]
-                  .sort_values("Avg Recovery (%)", ascending=False)
-                  .head(top_n).copy())
-        if cat_df.empty: continue
+        cat_sub = rec_disp_df[rec_disp_df["Category"] == cat].copy() if not rec_disp_df.empty else pd.DataFrame()
+        if cat_sub.empty: continue
+        cat_sub = (cat_sub.sort_values("_val", ascending=False)
+                          .head(top_n)
+                          .sort_values("_val", ascending=True)
+                          .copy())
 
-        with st.expander(f"**{cat}**", expanded=True):
-            bar_col = ["#1565c0" if v >= avg_nifty_rec * 1.1
-                       else "#42a5f5" if v >= avg_nifty_rec
+        with st.expander(f"**{cat}** — top {top_n} fastest recovery (best at top)", expanded=True):
+            bar_col = ["#1565c0" if v >= rec_ref * 1.1
+                       else "#42a5f5" if v >= rec_ref
                        else "#ffcc80"
-                       for v in cat_df["Avg Recovery (%)"]]
+                       for v in cat_sub["_val"]]
             fig_r = go.Figure()
             fig_r.add_trace(go.Bar(
-                x=cat_df["Avg Recovery (%)"],
-                y=cat_df["Fund"].apply(lambda x: x[:55]+"…" if len(x)>55 else x),
+                x=cat_sub["_val"],
+                y=cat_sub["Fund"].apply(lambda x: x[:55]+"…" if len(x)>55 else x),
                 orientation="h", marker_color=bar_col,
-                text=cat_df["Avg Recovery (%)"].map("{:.1f}%".format),
+                text=cat_sub["_val"].map("{:.1f}%".format),
                 textposition="outside"))
-            fig_r.add_vline(x=avg_nifty_rec, line_dash="dash", line_color="#1565c0",
-                            annotation_text=f"Nifty avg {avg_nifty_rec:.1f}%",
-                            annotation_font_size=10)
+            fig_r.add_vline(x=rec_ref, line_dash="dash", line_color="#1565c0",
+                            annotation_text=rec_label, annotation_font_size=10)
             fig_r.update_layout(
-                height=max(260, top_n * 52),
-                template="plotly_white",
+                height=max(260, top_n * 52), template="plotly_white",
                 margin=dict(l=10, r=60, t=10, b=10),
-                xaxis=dict(ticksuffix="%", title=""),
-                yaxis=dict(title=""),
+                xaxis=dict(ticksuffix="%", title=""), yaxis=dict(title=""),
                 showlegend=False)
             st.plotly_chart(fig_r, use_container_width=True)
 
-            tbl = cat_df[["Fund", "Avg Recovery (%)"]].copy().reset_index(drop=True)
-            tbl["vs Nifty"] = (cat_df["Avg Recovery (%)"].values - avg_nifty_rec)
-            tbl["vs Nifty"] = tbl["vs Nifty"].map(
-                lambda x: f"+{x:.1f}%" if x >= 0 else f"{x:.1f}%")
-            tbl["Avg Recovery (%)"] = tbl["Avg Recovery (%)"].map("{:.1f}%".format)
+            tbl = cat_sub[["Fund", "_val"]].copy().reset_index(drop=True)
+            tbl["vs Nifty"] = (cat_sub["_val"].values - rec_ref)
+            tbl["vs Nifty"] = tbl["vs Nifty"].map(lambda x: f"+{x:.1f}%" if x >= 0 else f"{x:.1f}%")
+            tbl["_val"]     = tbl["_val"].map("{:.1f}%".format)
+            tbl.columns     = ["Fund", "Recovery Return", "vs Nifty"]
             st.dataframe(tbl, use_container_width=True, hide_index=True)
 
 
@@ -952,9 +1058,34 @@ with tab_guide:
     st.divider()
 
     # ── SECTION 6: Fund Categories ────────────────────────────
-  
+    st.markdown("### 🏷️ Fund Categories")
 
-   
+    cat_rows = [
+        ("Large Cap",       "Invests in top 100 companies by market cap. Generally most stable during crashes."),
+        ("Mid Cap",         "Invests in companies ranked 101–250. Higher growth potential, higher crash risk."),
+        ("Small Cap",       "Invests in companies ranked 251+. Highest risk — tends to fall most in crashes."),
+        ("Flexi Cap",       "Fund manager can invest across any market cap. Flexibility to reduce risk."),
+        ("Large & Mid Cap", "Minimum 35% each in large and mid cap. Balanced risk profile."),
+        ("Multi Cap",       "Minimum 25% each in large, mid, and small cap. Mandatory diversification."),
+        ("Banking & Finance", "Sector fund — only banking, NBFCs, insurance stocks. High Nifty correlation."),
+        ("Technology",      "Sector fund — IT and tech companies. Can decouple from domestic market."),
+        ("Pharma & Healthcare", "Sector fund — defensive sector, often holds up well during market crashes."),
+        ("Infrastructure",  "Sector fund — capital-intensive, cyclical. Typically falls hard in crashes."),
+        ("Consumption",     "Sector fund — consumer goods and retail. Relatively resilient in mild crashes."),
+        ("Energy & Resources", "Sector fund — oil, gas, metals. Highly cyclical and volatile."),
+    ]
+
+    for cat, desc in cat_rows:
+        st.html(f"""
+        <div style='display:flex;gap:12px;padding:8px 0;border-bottom:1px solid #f3f4f6;
+                    font-family:-apple-system,sans-serif'>
+          <div style='min-width:160px;font-weight:600;color:#1e3a5f;
+                      font-size:12px;padding-top:2px'>{cat}</div>
+          <div style='color:#374151;font-size:13px;line-height:1.5'>{desc}</div>
+        </div>
+        """)
+
+    st.divider()
 
     # ── SECTION 7: Sidebar Controls ───────────────────────────
     st.markdown("### ⚙️ Sidebar Controls Explained")
