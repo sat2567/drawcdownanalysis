@@ -411,9 +411,14 @@ crash_mat, recovery_mat, rec_end_mat = build_matrices(
 # ── Aggregate averages ────────────────────────────────────────
 avg_crash = {}
 avg_rec   = {}
+ev_indices = list(events_df.index)
 for fund in all_funds.columns:
-    c_vals = [v for v in crash_mat[fund].values()    if not np.isnan(v)]
-    r_vals = [v for v in recovery_mat[fund].values() if not np.isnan(v)]
+    if fund not in crash_mat:
+        continue
+    c_vals = [crash_mat[fund].get(i, np.nan)    for i in ev_indices]
+    r_vals = [recovery_mat[fund].get(i, np.nan) for i in ev_indices]
+    c_vals = [v for v in c_vals if isinstance(v, float) and not np.isnan(v)]
+    r_vals = [v for v in r_vals if isinstance(v, float) and not np.isnan(v)]
     if c_vals: avg_crash[fund] = np.mean(c_vals)
     if r_vals: avg_rec[fund]   = np.mean(r_vals)
 
@@ -425,19 +430,7 @@ summary_df = pd.DataFrame({
 summary_df["Category"] = summary_df["Fund"].map(category_map)
 summary_df = summary_df[summary_df["Category"].isin(selected_cats)]
 
-# Ranks within category (lower = better for both)
-def add_ranks(df):
-    df = df.copy()
-    df["Crash Rank"]    = df.groupby("Category")["Avg Crash (%)"].rank(
-        ascending=False, method="min")   # less negative = rank 1
-    df["Recovery Rank"] = df.groupby("Category")["Avg Recovery (%)"].rank(
-        ascending=False, method="min")   # higher = rank 1
-    df["All-Weather Score"] = df["Crash Rank"] + df["Recovery Rank"]  # lower = better
-    df["All-Weather Rank"]  = df.groupby("Category")["All-Weather Score"].rank(
-        ascending=True, method="min")
-    return df
 
-summary_df = add_ranks(summary_df)
 avg_nifty_crash = events_df["nifty_fall"].mean()
 
 # ── Top-level metrics ─────────────────────────────────────────
@@ -456,11 +449,10 @@ st.divider()
 # ══════════════════════════════════════════════════════════════
 #  TABS
 # ══════════════════════════════════════════════════════════════
-tab1, tab2, tab3, tab4, tab5 = st.tabs([
+tab1, tab2, tab3, tab5 = st.tabs([
     "📆 Crash Events",
     "📉 Drawdown Rankings",
     "📈 Recovery Rankings",
-    "🏅 All-Weather Rankings",
     "🗂️ Full Heatmap",
 ])
 
@@ -649,161 +641,6 @@ with tab3:
                 tbl["vs Nifty"] = tbl["vs Nifty"].map(lambda x: f"+{x:.2f}%" if x>=0 else f"{x:.2f}%")
                 tbl["Avg Recovery (%)"] = tbl["Avg Recovery (%)"].map("{:.2f}%".format)
                 st.dataframe(tbl, use_container_width=True, hide_index=True)
-
-
-# ─── TAB 4 — All-Weather Rankings ─────────────────────────────
-with tab4:
-    st.subheader("🏅 All-Weather Rankings — Best on Both Crash + Recovery")
-    st.markdown(
-        "**All-Weather Score = Crash Rank + Recovery Rank** within each category.  \n"
-        "Lower score = better. Score of 2 = ranked #1 on both crash AND recovery (perfect fund).  \n"
-        "🟦 Dark blue = excellent, 🟨 Yellow = average."
-    )
-
-    for cat in sorted(selected_cats):
-        cat_df = (summary_df[summary_df["Category"]==cat]
-                  .sort_values("All-Weather Score", ascending=True)
-                  .head(top_n).copy())
-        if cat_df.empty: continue
-
-        with st.expander(f"📂  {cat}  —  Top {top_n} all-weather funds", expanded=True):
-            # Scatter: x = avg crash, y = avg recovery, size = all-weather score inverted
-            cat_all = summary_df[summary_df["Category"]==cat].copy()
-            max_score = cat_all["All-Weather Score"].max()
-            cat_all["bubble_size"] = (max_score - cat_all["All-Weather Score"] + 1) * 4
-
-            fig_s = go.Figure()
-            fig_s.add_trace(go.Scatter(
-                x=cat_all["Avg Crash (%)"],
-                y=cat_all["Avg Recovery (%)"],
-                mode="markers+text",
-                marker=dict(
-                    size=cat_all["bubble_size"],
-                    color=cat_all["All-Weather Score"],
-                    colorscale="RdYlGn_r",
-                    showscale=True,
-                    colorbar=dict(title="Score<br>(lower=better)"),
-                    line=dict(width=1, color="white")
-                ),
-                text=cat_all["Fund"].apply(lambda x: x.split("-")[0][:25]),
-                textposition="top center",
-                textfont=dict(size=9),
-                customdata=cat_all[["Fund","All-Weather Score",
-                                     "Avg Crash (%)","Avg Recovery (%)"]].values,
-                hovertemplate=(
-                    "<b>%{customdata[0]}</b><br>"
-                    "Score: %{customdata[1]:.0f}<br>"
-                    "Crash: %{customdata[2]:.2f}%<br>"
-                    "Recovery: %{customdata[3]:.2f}%<extra></extra>"
-                )
-            ))
-            # Quadrant lines
-            fig_s.add_vline(x=avg_nifty_crash, line_dash="dot",
-                             line_color="red", opacity=0.4)
-            fig_s.add_hline(y=avg_nifty_rec,  line_dash="dot",
-                             line_color="blue", opacity=0.4)
-            # Ideal quadrant label
-            fig_s.add_annotation(
-                x=cat_all["Avg Crash (%)"].max()*0.7,
-                y=cat_all["Avg Recovery (%)"].max()*0.95,
-                text="⭐ Ideal: low crash, high recovery",
-                font=dict(size=9, color="#555"), showarrow=False)
-
-            fig_s.update_layout(
-                title=f"{cat} — Crash vs Recovery (top-right = best)",
-                xaxis_title="Avg Crash Return % (→ closer to 0 = better)",
-                yaxis_title="Avg Recovery % (→ higher = better)",
-                height=480, template="plotly_white")
-            st.plotly_chart(fig_s, use_container_width=True)
-
-            # Ranking table
-            tbl = cat_df[["Fund","Avg Crash (%)","Avg Recovery (%)",
-                           "Crash Rank","Recovery Rank","All-Weather Score",
-                           "All-Weather Rank"]].copy().reset_index(drop=True)
-            tbl["Avg Crash (%)"]   = tbl["Avg Crash (%)"].map("{:.2f}%".format)
-            tbl["Avg Recovery (%)"]= tbl["Avg Recovery (%)"].map("{:.2f}%".format)
-            tbl["Crash Rank"]      = tbl["Crash Rank"].map("{:.0f}".format)
-            tbl["Recovery Rank"]   = tbl["Recovery Rank"].map("{:.0f}".format)
-            tbl["All-Weather Score"] = tbl["All-Weather Score"].map("{:.0f}".format)
-            tbl["All-Weather Rank"]  = tbl["All-Weather Rank"].map("{:.0f}".format)
-            st.dataframe(tbl, use_container_width=True, hide_index=True)
-
-    # Cross-category NAV chart for best all-weather fund per category
-    st.divider()
-    st.subheader("📈 Best All-Weather Fund per Category — NAV Comparison")
-    best_per_cat = (summary_df.sort_values("All-Weather Score")
-                    .groupby("Category").first().reset_index())
-    best_funds   = best_per_cat[best_per_cat["Category"].isin(selected_cats)]["Fund"].tolist()
-
-    ev_labels2 = {
-        f"Ev{i+1}: {ev['peak_date'].strftime('%d %b %Y')} → "
-        f"{ev['trough_date'].strftime('%d %b %Y')} (Nifty {ev['nifty_fall']:.1f}%)": i
-        for i, ev in events_df.iterrows()
-    }
-    chosen_label2 = st.selectbox("Select crash event to zoom", list(ev_labels2.keys()),
-                                  key="aw_ev")
-    chosen_idx2   = ev_labels2[chosen_label2]
-    chosen_ev2    = events_df.loc[chosen_idx2]
-
-    pad   = pd.Timedelta(days=15)
-    # window: before peak → after recovery (or fixed)
-    rec_end_global = chosen_ev2["recovery_date"]
-    if pd.isna(rec_end_global):
-        rec_end_global = chosen_ev2["trough_date"] + pd.Timedelta(days=fixed_days)
-    w_start2 = chosen_ev2["peak_date"]   - pad
-    w_end2   = min(rec_end_global + pad, last_date)
-
-    fig_aw = make_subplots(rows=2, cols=1, shared_xaxes=True,
-                            row_heights=[0.65, 0.35],
-                            subplot_titles=("NAV indexed to 100 at crash peak",
-                                            "% change from crash peak"))
-    nifty_w2  = nifty[w_start2:w_end2]
-    base_n2   = float(nifty[nifty.index >= chosen_ev2["peak_date"]].iloc[0])
-    fig_aw.add_trace(go.Scatter(x=nifty_w2.index,
-                                 y=(nifty_w2/base_n2*100).values,
-                                 name="Nifty50",
-                                 line=dict(color="black",width=2.5,dash="dot")), row=1, col=1)
-    fig_aw.add_trace(go.Scatter(x=nifty_w2.index,
-                                 y=((nifty_w2-base_n2)/base_n2*100).values,
-                                 name="Nifty %",
-                                 line=dict(color="black",width=1.5,dash="dot"),
-                                 fill="tozeroy", fillcolor="rgba(0,0,0,0.05)"), row=2, col=1)
-
-    palette = px.colors.qualitative.Bold
-    for idx, fund in enumerate(best_funds):
-        nav_w = all_funds[fund][w_start2:w_end2].dropna()
-        if nav_w.empty: continue
-        ap2 = nav_w[nav_w.index >= chosen_ev2["peak_date"]]
-        if ap2.empty: continue
-        base_f2 = float(ap2.iloc[0])
-        color   = palette[idx % len(palette)]
-        label   = f"{fund.split('-')[0][:30]} [{category_map[fund]}]"
-        cr_ret  = crash_mat[fund].get(chosen_idx2, np.nan)
-        rc_ret  = recovery_mat[fund].get(chosen_idx2, np.nan)
-        leg_lbl = f"{label} | 📉{cr_ret:.1f}% 📈{rc_ret:.1f}%"
-
-        fig_aw.add_trace(go.Scatter(x=nav_w.index, y=(nav_w/base_f2*100).values,
-                                     name=leg_lbl, line=dict(color=color, width=1.8)),
-                          row=1, col=1)
-        fig_aw.add_trace(go.Scatter(x=nav_w.index,
-                                     y=((nav_w-base_f2)/base_f2*100).values,
-                                     name=leg_lbl, line=dict(color=color,width=1.2,dash="dash"),
-                                     showlegend=False), row=2, col=1)
-
-    for rn in [1, 2]:
-        fig_aw.add_vline(x=chosen_ev2["peak_date"], line_dash="dot",
-                          line_color="green", line_width=1.5, row=rn, col=1)
-        fig_aw.add_vline(x=chosen_ev2["trough_date"], line_dash="dot",
-                          line_color="red", line_width=1.5, row=rn, col=1)
-        if pd.notna(chosen_ev2["recovery_date"]):
-            fig_aw.add_vline(x=chosen_ev2["recovery_date"], line_dash="dot",
-                              line_color="blue", line_width=1.5, row=rn, col=1)
-
-    fig_aw.update_layout(height=640, template="plotly_white",
-                          legend=dict(orientation="h", y=-0.2, font=dict(size=9)))
-    fig_aw.update_yaxes(ticksuffix="%", row=2, col=1)
-    st.plotly_chart(fig_aw, use_container_width=True)
-    st.caption("🟢 Peak  |  🔴 Trough  |  🔵 Full recovery  |  Legend: 📉 crash return, 📈 recovery return")
 
 
 # ─── TAB 5 — Full Heatmap ─────────────────────────────────────
