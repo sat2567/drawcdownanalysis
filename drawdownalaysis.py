@@ -329,6 +329,12 @@ def render_summary_cards(best_rows, value_col, value_suffix="", label=""):
         val  = r[value_col]
         cat  = r["Category"]
         fund = r["Fund"]
+        # Skip rows with no data
+        try:
+            val = float(val)
+            if np.isnan(val): continue
+        except (TypeError, ValueError):
+            continue
         # Shorten fund name: strip house name before first space after common patterns
         short = fund.split("-Reg")[0].split("-Dir")[0].split("(G)")[0].strip()
         if len(short) > 38: short = short[:36] + "…"
@@ -559,9 +565,11 @@ with tab_crash:
         st.markdown("##### 🏆 Most Resilient Fund per Category")
         best_crash_disp = (disp_df.dropna(subset=["_val"])
                       .sort_values("_val", ascending=False)
-                      .groupby("Category", sort=False).first().reset_index())
+                      .groupby("Category", sort=False).first().reset_index()
+                      .dropna(subset=["_val"]))
         best_crash_disp = best_crash_disp.rename(columns={"_val": "Avg Crash (%)"})
-        st.html(render_summary_cards(best_crash_disp, "Avg Crash (%)", "crash"))
+        if not best_crash_disp.empty:
+            st.html(render_summary_cards(best_crash_disp, "Avg Crash (%)", "crash"))
     st.divider()
 
     for cat in sorted(selected_cats):
@@ -649,9 +657,11 @@ with tab_rec:
         st.markdown("##### 🚀 Fastest Recovery Fund per Category")
         best_rec_disp = (rec_disp_df.dropna(subset=["_val"])
                     .sort_values("_val", ascending=False)
-                    .groupby("Category", sort=False).first().reset_index())
+                    .groupby("Category", sort=False).first().reset_index()
+                    .dropna(subset=["_val"]))
         best_rec_disp = best_rec_disp.rename(columns={"_val": "Avg Recovery (%)"})
-        st.html(render_summary_cards(best_rec_disp, "Avg Recovery (%)", "rec"))
+        if not best_rec_disp.empty:
+            st.html(render_summary_cards(best_rec_disp, "Avg Recovery (%)", "rec"))
     st.divider()
 
     for cat in sorted(selected_cats):
