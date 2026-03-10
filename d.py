@@ -53,6 +53,30 @@ def classify_category(name):
     else:                                           return "Other"
 
 
+def classify_sector(name):
+    """Map sector fund name → sector label."""
+    n = name.lower()
+    if any(x in n for x in ["banking", "financial", "fin serv", "bfsi"]):
+        return "Banking & Finance"
+    elif any(x in n for x in ["pharma", "healthcare", "health", "diagnostics"]):
+        return "Pharma & Healthcare"
+    elif any(x in n for x in ["tech", "digital", "teck", "it "]):
+        return "Technology"
+    elif any(x in n for x in ["infra", "infrastructure", "build india", "tiger", "t.i.g.e.r",
+                               "power & infra", "resources & energy", "eco reform"]):
+        return "Infrastructure"
+    elif any(x in n for x in ["consumption", "consumer", "fmcg", "retail"]):
+        return "Consumption"
+    elif any(x in n for x in ["energy", "natural res", "power", "resources"]):
+        return "Energy & Resources"
+    elif any(x in n for x in ["auto", "automotive"]):
+        return "Automotive"
+    elif "services" in n:
+        return "Services"
+    else:
+        return "Sector – Other"
+
+
 def find_crash_events(nifty: pd.Series, threshold: float) -> pd.DataFrame:
     """
     Identify distinct crash events.
@@ -247,14 +271,28 @@ def load_data():
             data[col] = pd.to_numeric(data[col], errors="coerce")
         return data
 
-    funds = pd.concat([parse_excel("funds1.xlsx"),
-                       parse_excel("funds2.xlsx")], axis=1, sort=True)
+    equity_funds  = pd.concat([parse_excel("funds1.xlsx"),
+                                parse_excel("funds2.xlsx")], axis=1, sort=True)
+    sector_funds  = parse_excel("sectorfunds.xlsx")
+
+    # Build category maps before merging
+    eq_cat_map  = {col: classify_category(col) for col in equity_funds.columns}
+    sec_cat_map = {col: classify_sector(col)   for col in sector_funds.columns}
+    cat_map     = {**eq_cat_map, **sec_cat_map}
+
+    # Track which fund belongs to which universe
+    fund_universe = (
+        {col: "Equity" for col in equity_funds.columns} |
+        {col: "Sector" for col in sector_funds.columns}
+    )
+
+    all_funds = pd.concat([equity_funds, sector_funds], axis=1, sort=True)
+
     # Return FULL data — year filtering happens in the UI based on user selection
-    common = nifty.index.intersection(funds.index)
-    nifty  = nifty.reindex(common)
-    funds  = funds.reindex(common)
-    cat_map = {col: classify_category(col) for col in funds.columns}
-    return nifty, funds, cat_map
+    common = nifty.index.intersection(all_funds.index)
+    nifty     = nifty.reindex(common)
+    all_funds = all_funds.reindex(common)
+    return nifty, all_funds, cat_map, fund_universe
 
 
 # ── Pre-compute all fund × event matrices ─────────────────────
@@ -295,7 +333,7 @@ st.markdown(
 )
 
 with st.spinner("Loading data…"):
-    nifty_full, all_funds_full, category_map = load_data()
+    nifty_full, all_funds_full, category_map, fund_universe = load_data()
 
 last_date  = nifty_full.index.max()
 first_date = nifty_full.index.min()
@@ -337,8 +375,28 @@ fixed_days = st.sidebar.slider(
     help="If Nifty hasn't fully recovered yet, measure fund gain over this many days from trough")
 st.sidebar.markdown("### 🎛️ Display")
 top_n = st.sidebar.slider("Top N funds per category", 3, 15, 5)
-all_cats      = sorted(set(category_map.values()))
-selected_cats = st.sidebar.multiselect("Show categories", all_cats, default=all_cats)
+
+# Fund universe toggle
+fund_type = st.sidebar.radio(
+    "Fund universe",
+    ["All Funds", "Equity Funds Only", "Sector Funds Only"],
+    index=0,
+    help="Equity = diversified funds (Large Cap, Mid Cap, Flexi Cap etc.)  |  Sector = thematic funds (Banking, Pharma, Tech etc.)"
+)
+
+# Build category list based on universe selection
+equity_cats = sorted({v for k,v in category_map.items() if fund_universe.get(k)=="Equity"})
+sector_cats = sorted({v for k,v in category_map.items() if fund_universe.get(k)=="Sector"})
+all_cats    = sorted(set(category_map.values()))
+
+if fund_type == "Equity Funds Only":
+    default_cats = equity_cats
+elif fund_type == "Sector Funds Only":
+    default_cats = sector_cats
+else:
+    default_cats = all_cats
+
+selected_cats = st.sidebar.multiselect("Filter categories", all_cats, default=default_cats)
 
 # ── Find crash events ─────────────────────────────────────────
 events_df = find_crash_events(nifty, threshold)
