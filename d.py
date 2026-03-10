@@ -826,7 +826,7 @@ with tab5:
         date_str  = (f"Ev{i+1}<br>"
                      f"{ev['peak_date'].strftime('%d %b %y')} →<br>"
                      f"{ev['trough_date'].strftime('%d %b %y')}<br>"
-                     f"<span style='color:#fca5a5;font-weight:700'>{crash_str}</span>")
+                     f"<span style='color:#ff6b6b;font-weight:700'>{crash_str}</span>")
         hdr += f"<th {TH_EVENT}>{date_str}</th>"
 
     # ── Build Nifty benchmark row (pinned second row) ─────────
@@ -895,40 +895,56 @@ with tab5:
                 if is_crash:
                     # Crash: fund diff > 0 means fund fell LESS than Nifty = good
                     if diff > 1.0:
-                        badge = f"<br><span style='font-size:9px;color:#86efac'>▲{diff:.1f}%</span>"
+                        badge = f"<br><span style='font-size:9px;font-weight:700;color:#ffffff;background:rgba(0,0,0,0.32);border-radius:3px;padding:0 3px'>▲{diff:.1f}%</span>"
                     elif diff < -1.0:
-                        badge = f"<br><span style='font-size:9px;color:#fca5a5'>▼{abs(diff):.1f}%</span>"
+                        badge = f"<br><span style='font-size:9px;font-weight:700;color:#ffffff;background:rgba(0,0,0,0.32);border-radius:3px;padding:0 3px'>▼{abs(diff):.1f}%</span>"
                 else:
                     # Recovery: fund diff > 0 means fund recovered MORE than Nifty = good
                     if diff > 1.0:
-                        badge = f"<br><span style='font-size:9px;color:#86efac'>+{diff:.1f}%</span>"
+                        badge = f"<br><span style='font-size:9px;font-weight:700;color:#ffffff;background:rgba(0,0,0,0.32);border-radius:3px;padding:0 3px'>+{diff:.1f}%</span>"
                     elif diff < -1.0:
-                        badge = f"<br><span style='font-size:9px;color:#fca5a5'>{diff:.1f}%</span>"
+                        badge = f"<br><span style='font-size:9px;font-weight:700;color:#ffffff;background:rgba(0,0,0,0.32);border-radius:3px;padding:0 3px'>{diff:.1f}%</span>"
 
             cells += (f"<td style='background:{bg};color:{fg};"
                       f"padding:5px 7px;text-align:center;font-size:11px;"
                       f"border:1px solid rgba(0,0,0,0.05)'>{txt}{badge}</td>")
         body += f"<tr>{cells}</tr>"
 
-    # ── Legend ────────────────────────────────────────────────
+    # ── Legend — rendered OUTSIDE the scrollable table div ──────
     if is_crash:
-        legend_html = """
-        <div style='display:flex;gap:16px;padding:8px 12px;background:#f8f9fa;
-                     border-top:1px solid #dee2e6;font-size:11px;flex-wrap:wrap'>
-          <span>🟢 <b>Green</b> = small loss (resilient)</span>
-          <span>🔴 <b>Red</b> = large loss</span>
-          <span style='color:#86efac;font-weight:700'>▲X%</span> = outperformed Nifty by X%
-          <span style='color:#fca5a5;font-weight:700'>▼X%</span> = underperformed Nifty by X%
-        </div>"""
+        legend_items = [
+            ("<span style='display:inline-block;width:14px;height:14px;"
+             "background:#00aa37;border-radius:3px;vertical-align:middle'></span>",
+             "<b style='color:#1a1a1a'>Green</b> = small loss (resilient)"),
+            ("<span style='display:inline-block;width:14px;height:14px;"
+             "background:#dc3737;border-radius:3px;vertical-align:middle'></span>",
+             "<b style='color:#1a1a1a'>Red</b> = large loss"),
+            ("<b style='color:#15803d;font-size:13px'>▲X%</b>",
+             "<span style='color:#1a1a1a'>= beat Nifty by X%</span>"),
+            ("<b style='color:#b91c1c;font-size:13px'>▼X%</b>",
+             "<span style='color:#1a1a1a'>= worse than Nifty by X%</span>"),
+        ]
     else:
-        legend_html = """
-        <div style='display:flex;gap:16px;padding:8px 12px;background:#f8f9fa;
-                     border-top:1px solid #dee2e6;font-size:11px;flex-wrap:wrap'>
-          <span>🟢 <b>Dark green</b> = strong recovery</span>
-          <span>🟡 <b>Yellow</b> = weak recovery</span>
-          <span style='color:#86efac;font-weight:700'>+X%</span> = recovered more than Nifty
-          <span style='color:#fca5a5;font-weight:700'>-X%</span> = recovered less than Nifty
-        </div>"""
+        legend_items = [
+            ("<span style='display:inline-block;width:14px;height:14px;"
+             "background:#1eaf1e;border-radius:3px;vertical-align:middle'></span>",
+             "<b style='color:#1a1a1a'>Dark green</b> = strong recovery"),
+            ("<span style='display:inline-block;width:14px;height:14px;"
+             "background:#dc7832;border-radius:3px;vertical-align:middle'></span>",
+             "<b style='color:#1a1a1a'>Orange/Yellow</b> = weak recovery"),
+            ("<b style='color:#15803d;font-size:13px'>+X%</b>",
+             "<span style='color:#1a1a1a'>= recovered more than Nifty</span>"),
+            ("<b style='color:#b91c1c;font-size:13px'>−X%</b>",
+             "<span style='color:#1a1a1a'>= recovered less than Nifty</span>"),
+        ]
+
+    legend_spans = "".join(
+        f"<span style='display:flex;align-items:center;gap:6px;"
+        f"padding:6px 14px;background:#ffffff;border:1px solid #e2e8f0;"
+        f"border-radius:20px;white-space:nowrap;font-size:12px'>"
+        f"{icon}&nbsp;{label}</span>"
+        for icon, label in legend_items
+    )
 
     st.html(f"""
     <div style='overflow:auto;max-height:600px;border:1px solid #dee2e6;
@@ -943,7 +959,15 @@ with tab5:
           {body}
         </tbody>
       </table>
-      {legend_html}
+    </div>""")
+
+    # Legend rendered outside scroll container so it's always visible
+    st.html(f"""
+    <div style='display:flex;flex-wrap:wrap;gap:8px;padding:10px 4px;
+                margin-top:8px;font-family:-apple-system,BlinkMacSystemFont,sans-serif'>
+      <span style='font-size:12px;font-weight:600;color:#374151;
+                   align-self:center;padding-right:4px'>Legend:</span>
+      {legend_spans}
     </div>""")
 
     # ── Summary stats below heatmap ───────────────────────────
