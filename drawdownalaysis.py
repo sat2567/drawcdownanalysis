@@ -952,34 +952,9 @@ with tab_guide:
     st.divider()
 
     # ── SECTION 6: Fund Categories ────────────────────────────
-    st.markdown("### 🏷️ Fund Categories")
+  
 
-    cat_rows = [
-        ("Large Cap",       "Invests in top 100 companies by market cap. Generally most stable during crashes."),
-        ("Mid Cap",         "Invests in companies ranked 101–250. Higher growth potential, higher crash risk."),
-        ("Small Cap",       "Invests in companies ranked 251+. Highest risk — tends to fall most in crashes."),
-        ("Flexi Cap",       "Fund manager can invest across any market cap. Flexibility to reduce risk."),
-        ("Large & Mid Cap", "Minimum 35% each in large and mid cap. Balanced risk profile."),
-        ("Multi Cap",       "Minimum 25% each in large, mid, and small cap. Mandatory diversification."),
-        ("Banking & Finance", "Sector fund — only banking, NBFCs, insurance stocks. High Nifty correlation."),
-        ("Technology",      "Sector fund — IT and tech companies. Can decouple from domestic market."),
-        ("Pharma & Healthcare", "Sector fund — defensive sector, often holds up well during market crashes."),
-        ("Infrastructure",  "Sector fund — capital-intensive, cyclical. Typically falls hard in crashes."),
-        ("Consumption",     "Sector fund — consumer goods and retail. Relatively resilient in mild crashes."),
-        ("Energy & Resources", "Sector fund — oil, gas, metals. Highly cyclical and volatile."),
-    ]
-
-    for cat, desc in cat_rows:
-        st.html(f"""
-        <div style='display:flex;gap:12px;padding:8px 0;border-bottom:1px solid #f3f4f6;
-                    font-family:-apple-system,sans-serif'>
-          <div style='min-width:160px;font-weight:600;color:#1e3a5f;
-                      font-size:12px;padding-top:2px'>{cat}</div>
-          <div style='color:#374151;font-size:13px;line-height:1.5'>{desc}</div>
-        </div>
-        """)
-
-    st.divider()
+   
 
     # ── SECTION 7: Sidebar Controls ───────────────────────────
     st.markdown("### ⚙️ Sidebar Controls Explained")
