@@ -411,9 +411,14 @@ if events_df.empty:
     st.stop()
 
 # ── Matrices ──────────────────────────────────────────────────
+# events_fingerprint encodes every parameter that affects crash_mat:
+# fund universe, event dates, fixed_days window
+_events_fingerprint = tuple(
+    (str(r["peak_date"]), str(r["trough_date"])) for _, r in events_df.iterrows()
+)
 crash_mat, recovery_mat, rec_end_mat = build_matrices(
     all_funds, events_df, fixed_days, last_date,
-    _fund_keys=tuple(all_funds.columns))
+    _fund_keys=tuple(all_funds.columns) + (fixed_days,) + _events_fingerprint)
 
 # ── Nifty recovery refs (needed by tabs) ──────────────────────
 nifty_rec_refs = {}
