@@ -321,6 +321,39 @@ def build_matrices(_all_funds, _events_df, fixed_days, _last_date, _fund_keys=No
     return crash_mat, recovery_mat, rec_end_mat
 
 
+
+def render_summary_cards(best_rows, value_col, value_suffix="", label=""):
+    """Render one card per category showing the best fund."""
+    cards = ""
+    for _, r in best_rows.iterrows():
+        val  = r[value_col]
+        cat  = r["Category"]
+        fund = r["Fund"]
+        # Shorten fund name: strip house name before first space after common patterns
+        short = fund.split("-Reg")[0].split("-Dir")[0].split("(G)")[0].strip()
+        if len(short) > 38: short = short[:36] + "…"
+        val_str  = f"{val:+.1f}%" if value_suffix == "crash" else f"{val:.1f}%"
+        if value_suffix == "crash":
+            color = "#16a34a" if val >= -5 else "#ca8a04" if val >= -12 else "#dc2626"
+            icon  = "🛡️" if val >= -5 else "⚠️" if val >= -12 else "📉"
+        else:
+            color = "#1d4ed8" if val >= 20 else "#0891b2" if val >= 10 else "#b45309"
+            icon  = "🚀" if val >= 20 else "📈" if val >= 10 else "🐢"
+        cards += f"""
+        <div style='flex:1;min-width:180px;max-width:240px;background:#ffffff;
+                    border:1px solid #e5e7eb;border-top:3px solid {color};
+                    border-radius:8px;padding:12px 14px;box-shadow:0 1px 4px rgba(0,0,0,0.06)'>
+          <div style='font-size:10px;font-weight:600;color:#6b7280;
+                      text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px'>{cat}</div>
+          <div style='font-size:20px;font-weight:700;color:{color};margin-bottom:4px'>{icon} {val_str}</div>
+          <div style='font-size:11px;color:#374151;line-height:1.4'>{short}</div>
+        </div>"""
+    return f"""
+    <div style='display:flex;flex-wrap:wrap;gap:10px;padding:4px 0 14px 0;
+                font-family:-apple-system,BlinkMacSystemFont,sans-serif'>
+      {cards}
+    </div>"""
+
 # ─────────────────────────────────────────────────────────────
 #  APP UI
 # ─────────────────────────────────────────────────────────────
@@ -450,6 +483,14 @@ with tab_crash:
         f"Closer to 0 = fell least.  Red line = Nifty avg ({avg_nifty_crash:.1f}%)."
     )
 
+    # ── Best-fund summary cards ───────────────────────────────
+    st.markdown("##### 🏆 Most Resilient Fund per Category")
+    best_crash = (summary_df.dropna(subset=["Avg Crash (%)"])
+                  .sort_values("Avg Crash (%)", ascending=False)
+                  .groupby("Category", sort=False).first().reset_index())
+    st.html(render_summary_cards(best_crash, "Avg Crash (%)", "crash"))
+    st.divider()
+
     for cat in sorted(selected_cats):
         cat_df = (summary_df[summary_df["Category"] == cat]
                   .sort_values("Avg Crash (%)", ascending=False)
@@ -497,6 +538,14 @@ with tab_rec:
         f"Higher = stronger bounce.  Blue line = Nifty avg ({avg_nifty_rec:.1f}%)."
     )
 
+    # ── Best-fund summary cards ───────────────────────────────
+    st.markdown("##### 🚀 Fastest Recovery Fund per Category")
+    best_rec = (summary_df.dropna(subset=["Avg Recovery (%)"])
+                .sort_values("Avg Recovery (%)", ascending=False)
+                .groupby("Category", sort=False).first().reset_index())
+    st.html(render_summary_cards(best_rec, "Avg Recovery (%)", "rec"))
+    st.divider()
+
     for cat in sorted(selected_cats):
         cat_df = (summary_df[summary_df["Category"] == cat]
                   .sort_values("Avg Recovery (%)", ascending=False)
@@ -537,6 +586,26 @@ with tab_rec:
 
 # ─── TAB: Heatmap ─────────────────────────────────────────────
 with tab_heat:
+    # ── Combined best-fund summary table ─────────────────────
+    st.markdown("##### 📊 Best Fund per Category — Crash & Recovery Combined")
+    combined_rows = []
+    for cat in sorted(selected_cats):
+        cdf = summary_df[summary_df["Category"] == cat].dropna(
+            subset=["Avg Crash (%)", "Avg Recovery (%)"])
+        if cdf.empty: continue
+        best_c = cdf.sort_values("Avg Crash (%)", ascending=False).iloc[0]
+        best_r = cdf.sort_values("Avg Recovery (%)", ascending=False).iloc[0]
+        combined_rows.append({
+            "Category"          : cat,
+            "Best in Crash"     : best_c["Fund"].split("-Reg")[0].split("(G)")[0].strip(),
+            "Crash Return"      : f"{best_c['Avg Crash (%)']:.1f}%",
+            "Best in Recovery"  : best_r["Fund"].split("-Reg")[0].split("(G)")[0].strip(),
+            "Recovery Return"   : f"{best_r['Avg Recovery (%)']:.1f}%",
+        })
+    if combined_rows:
+        st.dataframe(pd.DataFrame(combined_rows), use_container_width=True, hide_index=True)
+    st.divider()
+
     col_vm, col_cf = st.columns([1, 1])
     with col_vm:
         view_mode = st.radio("Show", ["📉 Crash Returns", "📈 Recovery Returns"],
