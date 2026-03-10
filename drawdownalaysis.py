@@ -469,10 +469,11 @@ st.divider()
 # ══════════════════════════════════════════════════════════════
 #  TABS  (3 tabs only)
 # ══════════════════════════════════════════════════════════════
-tab_crash, tab_rec, tab_heat = st.tabs([
+tab_crash, tab_rec, tab_heat, tab_guide = st.tabs([
     "📉 Drawdown Rankings",
     "📈 Recovery Rankings",
     "🗂️ Heatmap",
+    "📖 Guide",
 ])
 
 
@@ -744,3 +745,313 @@ st.caption(
     f"📉 Crash = (NAV at trough − NAV at peak) / NAV at peak × 100  •  "
     f"📈 Recovery = (NAV at recovery end − NAV at trough) / NAV at trough × 100"
 )
+
+
+# ─── TAB: Guide ───────────────────────────────────────────────
+with tab_guide:
+
+    st.markdown("## 📖 How This Dashboard Works")
+    st.markdown(
+        "Everything you need to understand what the numbers mean, "
+        "how they are calculated, and how to read the charts."
+    )
+    st.divider()
+
+    # ── SECTION 1: Core Concept ───────────────────────────────
+    st.markdown("### 🎯 Core Idea")
+    st.html("""
+    <div style='background:#f0f9ff;border-left:4px solid #0ea5e9;padding:14px 18px;
+                border-radius:0 8px 8px 0;font-family:-apple-system,sans-serif;
+                font-size:14px;line-height:1.7;color:#0c4a6e;margin-bottom:8px'>
+      This dashboard answers one question: <b>when the Nifty50 crashes, which mutual funds
+      protect your money the most — and which ones recover the fastest afterwards?</b><br><br>
+      Instead of measuring a fund's own internal ups and downs, everything is measured
+      using <b>Nifty's timeline as the ruler</b>. Every fund is evaluated over the exact
+      same window — from when Nifty peaked to when Nifty bottomed — so the comparison
+      is perfectly fair across all funds.
+    </div>
+    """)
+
+    st.divider()
+
+    # ── SECTION 2: Key Terms ──────────────────────────────────
+    st.markdown("### 📌 Key Terms")
+
+    terms = [
+        ("Peak Date",
+         "The date Nifty50 reached its highest closing price before a crash began. "
+         "This is the starting point for all fund return calculations."),
+        ("Trough Date",
+         "The date Nifty50 hit its lowest closing price during the crash. "
+         "This marks the end of the crash window and the start of the recovery window."),
+        ("Crash Window",
+         "The period from Peak Date to Trough Date. "
+         "Fund NAV change in this window measures how much it fell during the crash."),
+        ("Recovery Date",
+         "The first date after the trough when Nifty50 closes back at or above the original peak value. "
+         "If Nifty has not recovered yet, a fixed forward window is used instead."),
+        ("Recovery Window",
+         "The period from Trough Date to Recovery Date (or Trough + N days if incomplete). "
+         "Fund NAV change in this window measures how strongly it bounced back."),
+        ("Crash Threshold (%)",
+         "The minimum % fall from peak that qualifies as a crash event. "
+         "Default is 9%. A 5% threshold finds more events; 15% finds only major crashes."),
+        ("NAV",
+         "Net Asset Value — the per-unit price of a mutual fund on any given day. "
+         "All fund returns are calculated using NAV values."),
+        ("vs Nifty",
+         "How much better (or worse) a fund performed compared to Nifty50 in the same window. "
+         "Positive = fund outperformed Nifty. Negative = fund underperformed."),
+    ]
+
+    for term, definition in terms:
+        st.html(f"""
+        <div style='display:flex;gap:12px;padding:10px 0;border-bottom:1px solid #f3f4f6;
+                    font-family:-apple-system,sans-serif'>
+          <div style='min-width:160px;font-weight:700;color:#1e3a5f;font-size:13px;
+                      padding-top:1px'>{term}</div>
+          <div style='color:#374151;font-size:13px;line-height:1.6'>{definition}</div>
+        </div>
+        """)
+
+    st.divider()
+
+    # ── SECTION 3: Formulas ───────────────────────────────────
+    st.markdown("### 🧮 Formulas")
+
+    st.markdown("**Crash Return (Drawdown)**")
+    st.html("""
+    <div style='background:#fef2f2;border:1px solid #fecaca;border-radius:8px;
+                padding:14px 18px;font-family:monospace;font-size:14px;
+                color:#7f1d1d;margin-bottom:12px'>
+      Crash Return (%) =
+        ( NAV on Trough Date &minus; NAV on Peak Date )
+        &divide; NAV on Peak Date &times; 100
+      <br><br>
+      <span style='color:#991b1b;font-size:12px'>
+        Example: NAV on Peak = ₹100, NAV on Trough = ₹73<br>
+        Crash Return = (73 − 100) / 100 × 100 = <b>−27%</b>
+      </span>
+    </div>
+    """)
+
+    st.markdown("**Recovery Return**")
+    st.html("""
+    <div style='background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;
+                padding:14px 18px;font-family:monospace;font-size:14px;
+                color:#14532d;margin-bottom:12px'>
+      Recovery Return (%) =
+        ( NAV on Recovery End &minus; NAV on Trough Date )
+        &divide; NAV on Trough Date &times; 100
+      <br><br>
+      <span style='color:#166534;font-size:12px'>
+        Example: NAV on Trough = ₹73, NAV on Recovery End = ₹102<br>
+        Recovery Return = (102 − 73) / 73 × 100 = <b>+39.7%</b>
+      </span>
+    </div>
+    """)
+
+    st.markdown("**Average across events**")
+    st.html("""
+    <div style='background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;
+                padding:14px 18px;font-family:monospace;font-size:14px;
+                color:#1e293b;margin-bottom:12px'>
+      Avg Crash (%) = mean of Crash Return across all events the fund participated in
+      <br>
+      Avg Recovery (%) = mean of Recovery Return across all events the fund participated in
+      <br><br>
+      <span style='font-size:12px;color:#475569'>
+        A fund is included only for events where NAV data exists on both dates.
+        If a fund launched after a crash event, that event is excluded from its average.
+      </span>
+    </div>
+    """)
+
+    st.divider()
+
+    # ── SECTION 4: How crash events are detected ──────────────
+    st.markdown("### 🔍 How Crash Events Are Detected")
+
+    st.html("""
+    <div style='font-family:-apple-system,sans-serif;font-size:13px;
+                color:#374151;line-height:1.8'>
+      The algorithm walks through Nifty's daily closing prices and tracks a rolling peak:
+    </div>
+    """)
+
+    steps = [
+        ("1", "Start tracking from day 1. Keep a rolling high (the peak so far).",
+         "#dbeafe", "#1e40af"),
+        ("2", "Every day: check if price has fallen ≥ threshold% below that rolling peak.",
+         "#fef3c7", "#92400e"),
+        ("3", "Once threshold is breached — a crash begins. Track the lowest point from here.",
+         "#fee2e2", "#991b1b"),
+        ("4", "Continue until Nifty recovers above peak × (1 − threshold/2). "
+              "The lowest point in this window = the Trough.",
+         "#fef3c7", "#92400e"),
+        ("5", "Record: Peak Date, Trough Date, fall %. Then search forward for the Recovery Date.",
+         "#dcfce7", "#166534"),
+        ("6", "If two events are within 10 days of each other, they are merged into one.",
+         "#f3e8ff", "#6b21a8"),
+    ]
+
+    for num, desc, bg, col in steps:
+        st.html(f"""
+        <div style='display:flex;align-items:flex-start;gap:12px;margin-bottom:8px;
+                    font-family:-apple-system,sans-serif'>
+          <div style='min-width:28px;height:28px;background:{bg};color:{col};
+                      border-radius:50%;display:flex;align-items:center;
+                      justify-content:center;font-weight:700;font-size:13px;
+                      flex-shrink:0'>{num}</div>
+          <div style='font-size:13px;color:#374151;line-height:1.6;padding-top:4px'>{desc}</div>
+        </div>
+        """)
+
+    st.divider()
+
+    # ── SECTION 5: Reading the Heatmap ────────────────────────
+    st.markdown("### 🗂️ Reading the Heatmap")
+
+    st.html("""
+    <div style='font-family:-apple-system,sans-serif;font-size:13px;
+                color:#374151;line-height:1.8;margin-bottom:12px'>
+      Each cell in the heatmap is one fund × one event.
+    </div>
+    """)
+
+    hm_items = [
+        ("#00aa37", "white", "−5%", "Dark green — fund barely fell. Excellent resilience."),
+        ("#6b6137", "white", "−15%", "Yellow-brown — fell about as much as Nifty average."),
+        ("#dc3737", "white", "−28%", "Red — heavy fall. Fell significantly more than Nifty."),
+        ("#7f1d1d", "white", "Nifty", "Dark red row — the Nifty50 benchmark. Compare all funds to this row."),
+    ]
+
+    cells_html = ""
+    for bg, fg, val, desc in hm_items:
+        cells_html += f"""
+        <div style='display:flex;align-items:center;gap:12px;margin-bottom:8px;
+                    font-family:-apple-system,sans-serif'>
+          <div style='min-width:60px;background:{bg};color:{fg};padding:6px 10px;
+                      border-radius:6px;text-align:center;font-size:13px;
+                      font-weight:700'>{val}</div>
+          <div style='font-size:13px;color:#374151'>{desc}</div>
+        </div>"""
+
+    st.html(cells_html)
+
+    st.html("""
+    <div style='background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;
+                padding:12px 16px;font-family:-apple-system,sans-serif;
+                font-size:13px;color:#374151;line-height:1.7;margin-top:4px'>
+      <b>▲X% badge</b> — fund outperformed Nifty by X% in that event<br>
+      <b>▼X% badge</b> — fund underperformed Nifty by X% in that event<br>
+      <b>— (dash)</b> — no NAV data available for this fund during this event
+    </div>
+    """)
+
+    st.divider()
+
+    # ── SECTION 6: Fund Categories ────────────────────────────
+    st.markdown("### 🏷️ Fund Categories")
+
+    cat_rows = [
+        ("Large Cap",       "Invests in top 100 companies by market cap. Generally most stable during crashes."),
+        ("Mid Cap",         "Invests in companies ranked 101–250. Higher growth potential, higher crash risk."),
+        ("Small Cap",       "Invests in companies ranked 251+. Highest risk — tends to fall most in crashes."),
+        ("Flexi Cap",       "Fund manager can invest across any market cap. Flexibility to reduce risk."),
+        ("Large & Mid Cap", "Minimum 35% each in large and mid cap. Balanced risk profile."),
+        ("Multi Cap",       "Minimum 25% each in large, mid, and small cap. Mandatory diversification."),
+        ("Banking & Finance", "Sector fund — only banking, NBFCs, insurance stocks. High Nifty correlation."),
+        ("Technology",      "Sector fund — IT and tech companies. Can decouple from domestic market."),
+        ("Pharma & Healthcare", "Sector fund — defensive sector, often holds up well during market crashes."),
+        ("Infrastructure",  "Sector fund — capital-intensive, cyclical. Typically falls hard in crashes."),
+        ("Consumption",     "Sector fund — consumer goods and retail. Relatively resilient in mild crashes."),
+        ("Energy & Resources", "Sector fund — oil, gas, metals. Highly cyclical and volatile."),
+    ]
+
+    for cat, desc in cat_rows:
+        st.html(f"""
+        <div style='display:flex;gap:12px;padding:8px 0;border-bottom:1px solid #f3f4f6;
+                    font-family:-apple-system,sans-serif'>
+          <div style='min-width:160px;font-weight:600;color:#1e3a5f;
+                      font-size:12px;padding-top:2px'>{cat}</div>
+          <div style='color:#374151;font-size:13px;line-height:1.5'>{desc}</div>
+        </div>
+        """)
+
+    st.divider()
+
+    # ── SECTION 7: Sidebar Controls ───────────────────────────
+    st.markdown("### ⚙️ Sidebar Controls Explained")
+
+    controls = [
+        ("Years of history", "1–6",
+         "How many years back to include. More years = more crash events captured. "
+         "Fund data starts Jan 2020, so 6 years is the maximum."),
+        ("Crash threshold (%)", "2–25%, default 9%",
+         "How large a Nifty fall must be to count as a crash event. "
+         "Lower = more events (including minor corrections). Higher = only major crashes."),
+        ("Recovery window (days)", "30–365, default 90",
+         "For crashes where Nifty hasn't yet recovered to its peak (e.g. the Sep 2024 crash), "
+         "this controls how many days forward from the trough to measure recovery."),
+        ("Top N funds shown", "3–15, default 5",
+         "How many funds to show per category in the ranking charts. "
+         "The top N by the relevant metric (crash resilience or recovery speed)."),
+        ("Fund universe", "All / Equity / Sector",
+         "All Funds = all 169 funds together. "
+         "Equity Only = 85 diversified funds (Large/Mid/Flexi/Multi/Small Cap). "
+         "Sector Only = 84 thematic sector funds (Banking, Pharma, Tech etc.)."),
+        ("Categories", "multiselect",
+         "Filter to show only specific categories. "
+         "Automatically updates when you change the Fund Universe."),
+    ]
+
+    for ctrl, range_str, desc in controls:
+        st.html(f"""
+        <div style='padding:10px 0;border-bottom:1px solid #f3f4f6;
+                    font-family:-apple-system,sans-serif'>
+          <div style='display:flex;align-items:center;gap:8px;margin-bottom:4px'>
+            <span style='font-weight:700;color:#1e3a5f;font-size:13px'>{ctrl}</span>
+            <span style='background:#e0f2fe;color:#0369a1;font-size:11px;
+                         padding:1px 8px;border-radius:10px'>{range_str}</span>
+          </div>
+          <div style='color:#374151;font-size:13px;line-height:1.6'>{desc}</div>
+        </div>
+        """)
+
+    st.divider()
+
+    # ── SECTION 8: Tips ───────────────────────────────────────
+    st.markdown("### 💡 Tips for Using This Dashboard")
+
+    tips = [
+        ("🔍", "Start with 6 years + 9% threshold",
+         "This gives you 7–8 events including COVID, the 2022 correction, and the 2024 crash — "
+         "a good mix of severe and moderate crashes."),
+        ("📊", "Use Equity Only vs Sector Only separately",
+         "Sector funds are fundamentally different — Banking fell 35–40% in COVID while Pharma "
+         "fell only 10%. Mixing them with diversified funds distorts rankings."),
+        ("🏆", "A fund that beats Nifty on crash AND recovery is rare",
+         "Most resilient-in-crash funds recover slower (defensive, low-beta). "
+         "Best-recovery funds often fell hard first. Look at both tabs to get the full picture."),
+        ("⚠️", "Beware of funds with few events",
+         "A fund launched in 2024 only has 1 event in its average. "
+         "Its ranking may look great simply because it missed all the big crashes."),
+        ("🗂️", "Use the heatmap to spot consistency",
+         "A fund that beat Nifty in 5 out of 7 events is more trustworthy than one that "
+         "topped one event but was worst in others."),
+    ]
+
+    for icon, title, body_txt in tips:
+        st.html(f"""
+        <div style='display:flex;gap:14px;padding:12px;margin-bottom:8px;
+                    background:#f9fafb;border-radius:8px;border:1px solid #f3f4f6;
+                    font-family:-apple-system,sans-serif'>
+          <div style='font-size:22px;flex-shrink:0'>{icon}</div>
+          <div>
+            <div style='font-weight:700;color:#111827;font-size:13px;
+                        margin-bottom:3px'>{title}</div>
+            <div style='color:#4b5563;font-size:13px;line-height:1.6'>{body_txt}</div>
+          </div>
+        </div>
+        """)
