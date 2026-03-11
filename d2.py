@@ -31,11 +31,12 @@ def load_all_data():
 
     f1         = parse_excel("funds1.xlsx")
     f2         = parse_excel("funds2.xlsx")
+    flexi      = parse_excel("flexi.xlsx")
     sec1       = parse_excel("sector1.xlsx")
     sec2       = parse_excel("sector2.xlsx")
     sec3       = parse_excel("sector3.xlsx")
     multiasset = parse_excel("multiasset.xlsx")
-    funds = pd.concat([f1, f2, sec1, sec2, sec3, multiasset], axis=1, sort=True)
+    funds = pd.concat([f1, f2, flexi, sec1, sec2, sec3, multiasset], axis=1, sort=True)
 
     def classify(name):
         n = name.lower()
@@ -60,6 +61,7 @@ def load_all_data():
     type_map = {}
     for col in f1.columns:         type_map[col] = "Equity"
     for col in f2.columns:         type_map[col] = "Equity"
+    for col in flexi.columns:      type_map[col] = "Equity"
     for col in sec1.columns:       type_map[col] = "Sector"
     for col in sec2.columns:       type_map[col] = "Sector"
     for col in sec3.columns:       type_map[col] = "Sector"
@@ -157,8 +159,18 @@ def fund_returns_in_window(funds, cat_map, start_date, end_date, max_gap_days=7,
         # NAV in full window
         window_nav = nav[(nav.index >= start_date) & (nav.index <= end_date)]
         if use_fund_peak:
-            # Use the fund's own peak within the crash window
-            v0 = float(window_nav.max())
+            # Use the fund's own peak ONLY if it occurs before the midpoint of the window.
+            # This corrects funds that peaked after Nifty but before the crash bottom.
+            # If the fund kept rising all the way to the trough, use Nifty-date NAV instead
+            # (those funds genuinely held up or gained — don't distort their return).
+            # Use fund's own peak if it occurred in the first 2/3 of the crash window.
+            # Funds peaking in the last 1/3 genuinely held up — use Nifty-date NAV.
+            cutoff = start_date + (end_date - start_date) * 2 / 3
+            peak_idx = window_nav.idxmax()
+            if peak_idx <= cutoff:
+                v0 = float(window_nav.max())
+            else:
+                v0 = float(s.iloc[0])
         else:
             v0 = float(s.iloc[0])
         v1 = float(e.iloc[-1])
