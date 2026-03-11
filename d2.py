@@ -257,17 +257,15 @@ def draw_bar_chart(cat_df, nifty_ref, annotation, top_n, mode):
 
 st.title("📉 Fund Crash & Recovery Analysis")
 
-# Bust cache whenever any data file changes
-import os, hashlib
-_data_files = ["funds1.xlsx","funds2.xlsx","flexi.xlsx",
-               "sector1.xlsx","sector2.xlsx","sector3.xlsx",
-               "multiasset.xlsx","Nifty50_10Years_Data.csv"]
-_cache_key = hashlib.md5(
-    b"".join(str(os.path.getmtime(f)).encode() for f in _data_files if os.path.exists(f))
-).hexdigest()
+# Cache version — increment this manually whenever data files are updated in the repo
+DATA_VERSION = "v6"
+
+if st.sidebar.button("🔄 Refresh Data"):
+    st.cache_data.clear()
+    st.rerun()
 
 with st.spinner("Loading data…"):
-    nifty, funds, cat_map, type_map = load_all_data(_cache_key)
+    nifty, funds, cat_map, type_map = load_all_data(DATA_VERSION)
 
 # Sidebar
 threshold = st.sidebar.slider("Nifty crash threshold (%)", 5.0, 40.0, 15.0, 1.0)
@@ -341,7 +339,7 @@ EQUITY_CATS = {"Flexi Cap", "Small Cap", "Multi Cap", "Large & Mid Cap",
 SECTOR_CATS = {"Banking & Finance", "Pharma & Healthcare", "Technology",
                "Infrastructure", "Consumption", "Energy", "Automotive", "Other"}
 
-tab_crash, tab_rec = st.tabs(["📉 Crash Period", "📈 Recovery Period"])
+tab_crash, tab_rec, tab_consistent = st.tabs(["📉 Crash Period", "📈 Recovery Period", "🏅 Consistent Performers"])
 
 
 def render_equity_section(df, nifty_ref, ref_label, mode, col_label):
@@ -504,3 +502,110 @@ with tab_rec:
         st.divider()
         render_sector_section(rec_df, nifty_rec_pct,
                               f"Nifty {nifty_rec_pct:.1f}%", "recovery", "Recovery Gain")
+
+
+# ══════════════  CONSISTENT PERFORMERS TAB  ══════════════
+with tab_consistent:
+    st.caption(
+        "Funds that beat or matched Nifty50 **in every crash event ≥ 15%** where they had complete data.  "
+        "Only funds present in **at least 2 events** are shown."
+    )
+
+    CONSISTENT_THRESHOLD = 15.0
+    all_crashes = find_crashes(nifty, CONSISTENT_THRESHOLD)
+
+    if all_crashes.empty:
+        st.warning("No crash events ≥ 15% found.")
+    else:
+        # Build per-fund per-event return table
+        records = []
+        for idx, ev_row in all_crashes.iterrows():
+            ev_peak   = ev_row["peak_date"]
+            ev_trough = ev_row["trough_date"]
+            ev_fall   = ev_row["nifty_fall"]
+            ev_label  = f"Ev{idx+1}: {ev_peak.strftime('%b %Y')} ({ev_fall:.1f}%)"
+            df_ev = fund_returns_in_window(
+                funds, cat_map, ev_peak, ev_trough,
+                use_fund_peak=use_fund_peak
+            )
+            for _, row in df_ev.iterrows():
+                records.append({
+                    "Fund":        row["Fund"],
+                    "Category":    row["Category"],
+                    "Event":       ev_label,
+                    "Nifty_Fall":  ev_fall,
+                    "Return":      row["Return"],
+                    "Beat_Nifty":  row["Return"] > ev_fall,
+                })
+
+        if not records:
+            st.warning("No fund data found across events.")
+        else:
+            all_ev_df = pd.DataFrame(records)
+            ev_labels_all = all_ev_df["Event"].unique().tolist()
+
+            # Pivot: Fund × Event → Return
+            pivot = all_ev_df.pivot_table(
+                index=["Fund", "Category"], columns="Event",
+                values="Return", aggfunc="first"
+            ).reset_index()
+
+            beat_pivot = all_ev_df.pivot_table(
+                index=["Fund", "Category"], columns="Event",
+                values="Beat_Nifty", aggfunc="first"
+            ).reset_index()
+
+            # Count events each fund participated in and how many it beat Nifty
+            ret_cols = [c for c in pivot.columns if c not in ["Fund", "Category"]]
+            pivot["Events_Participated"] = pivot[ret_cols].notna().sum(axis=1)
+            beat_cols = [c for c in beat_pivot.columns if c not in ["Fund", "Category"]]
+            pivot["Events_Beat"] = beat_pivot[beat_cols].sum(axis=1, min_count=1).fillna(0).astype(int)
+            pivot["Beat_Rate"]   = (pivot["Events_Beat"] / pivot["Events_Participated"] * 100).round(1)
+
+            # Filter: at least 2 events participated
+            pivot = pivot[pivot["Events_Participated"] >= 2].copy()
+
+            # Avg return across all events participated
+            pivot["Avg_Return"] = pivot[ret_cols].mean(axis=1).round(2)
+
+            # All categories together
+            all_cats = sorted(pivot["Category"].unique())
+
+            st.subheader("🏆 Funds by Beat Rate across all crash events")
+            st.markdown("*Beat Rate = % of events where fund fell less than Nifty50*")
+
+            for cat in all_cats:
+                cat_p = pivot[pivot["Category"] == cat].copy()
+                if cat_p.empty:
+                    continue
+
+                # Sort by beat rate desc, then avg return desc
+                cat_p = cat_p.sort_values(["Beat_Rate", "Avg_Return"], ascending=[False, False])
+
+                display = cat_p[["Fund", "Events_Participated", "Events_Beat", "Beat_Rate", "Avg_Return"]].copy()
+                # Add per-event return columns
+                for ev in ev_labels_all:
+                    if ev in cat_p.columns:
+                        nifty_fall_ev = all_ev_df[all_ev_df["Event"] == ev]["Nifty_Fall"].iloc[0]
+                        display[ev] = cat_p[ev].map(
+                            lambda x, nf=nifty_fall_ev: (
+                                f"{x:.1f}% ✅" if pd.notna(x) and x > nf
+                                else f"{x:.1f}% ❌" if pd.notna(x)
+                                else "—"
+                            )
+                        )
+
+                display["Beat_Rate"]  = display["Beat_Rate"].map("{:.0f}%".format)
+                display["Avg_Return"] = display["Avg_Return"].map("{:.1f}%".format)
+                display.columns = (
+                    ["Fund", "# Events", "# Beat", "Beat Rate", "Avg Return"] +
+                    [e for e in ev_labels_all if e in cat_p.columns]
+                )
+
+                total = len(display)
+                always_beat = (cat_p["Beat_Rate"] == 100).sum()
+                with st.expander(
+                    f"**{cat}**  —  {total} funds  |  {always_beat} beat Nifty in ALL events",
+                    expanded=True
+                ):
+                    st.dataframe(display, use_container_width=True, hide_index=True)
