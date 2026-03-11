@@ -9,8 +9,9 @@ st.set_page_config(page_title="Fund Crash & Recovery Analysis", layout="wide", p
 #  DATA LOADING
 # ─────────────────────────────────────────────────────────────
 
-@st.cache_data
-def load_all_data():
+@st.cache_data(show_spinner=False)
+def load_all_data(_cache_buster=None):
+    """_cache_buster is derived from file mtimes — changing any data file auto-invalidates cache."""
     raw = pd.read_csv("Nifty50_10Years_Data.csv")
     raw["Date"] = (pd.to_datetime(raw["Date"], utc=True)
                    .dt.tz_convert("Asia/Kolkata")
@@ -256,8 +257,17 @@ def draw_bar_chart(cat_df, nifty_ref, annotation, top_n, mode):
 
 st.title("📉 Fund Crash & Recovery Analysis")
 
+# Bust cache whenever any data file changes
+import os, hashlib
+_data_files = ["funds1.xlsx","funds2.xlsx","flexi.xlsx",
+               "sector1.xlsx","sector2.xlsx","sector3.xlsx",
+               "multiasset.xlsx","Nifty50_10Years_Data.csv"]
+_cache_key = hashlib.md5(
+    b"".join(str(os.path.getmtime(f)).encode() for f in _data_files if os.path.exists(f))
+).hexdigest()
+
 with st.spinner("Loading data…"):
-    nifty, funds, cat_map, type_map = load_all_data()
+    nifty, funds, cat_map, type_map = load_all_data(_cache_key)
 
 # Sidebar
 threshold = st.sidebar.slider("Nifty crash threshold (%)", 5.0, 40.0, 15.0, 1.0)
