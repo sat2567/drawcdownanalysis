@@ -350,23 +350,41 @@ def render_equity_section(df, nifty_ref, ref_label, mode, col_label):
     if eq_df.empty:
         return
     st.markdown("### 📂 Equity Funds — by Category")
-    best = (eq_df.sort_values("Return", ascending=False)
-            .groupby("Category", sort=False).first()
-            .reset_index()[["Category", "Fund", "Return"]])
-    best["vs Nifty"] = (best["Return"] - nifty_ref).map(
+
+    # Summary table: avg + median + best fund per category
+    agg = (eq_df.groupby("Category")["Return"]
+           .agg(Count="count", Avg="mean", Median="median", Best="max", Worst="min")
+           .reset_index()
+           .sort_values("Avg", ascending=False))
+    best_fund = (eq_df.sort_values("Return", ascending=False)
+                 .groupby("Category", sort=False).first()
+                 .reset_index()[["Category", "Fund", "Return"]]
+                 .rename(columns={"Fund": "Best Fund", "Return": "Best Return"}))
+    summary = agg.merge(best_fund, on="Category")
+    summary["vs Nifty (Avg)"] = (summary["Avg"] - nifty_ref).map(
         lambda x: f"+{x:.1f}%" if x >= 0 else f"{x:.1f}%")
-    best["Return"] = best["Return"].map("{:.1f}%".format)
-    st.dataframe(best, use_container_width=True, hide_index=True)
+    summary["Best Return"] = summary["Best Return"].map("{:.1f}%".format)
+    summary["Worst"]       = summary["Worst"].map("{:.1f}%".format)
+    summary["Avg"]         = summary["Avg"].map("{:.1f}%".format)
+    summary["Median"]      = summary["Median"].map("{:.1f}%".format)
+    summary = summary[["Category", "Count", "Avg", "Median", "Best Fund", "Best Return", "Worst", "vs Nifty (Avg)"]]
+    summary.columns = ["Category", "# Funds", "Avg Return", "Median Return", "Best Fund", "Best Return", "Worst Return", "vs Nifty (Avg)"]
+    st.dataframe(summary, use_container_width=True, hide_index=True)
     st.markdown("")
 
     for cat in sorted(eq_df["Category"].unique()):
         cat_df = eq_df[eq_df["Category"] == cat]
         total  = len(cat_df)
         beat_n = (cat_df["Return"] > nifty_ref).sum()
+        avg    = cat_df["Return"].mean()
+        median = cat_df["Return"].median()
         fig, tbl = draw_bar_chart(cat_df, nifty_ref, ref_label, top_n, mode)
         if fig is None:
             continue
-        with st.expander(f"**{cat}**  —  {beat_n}/{total} beat Nifty", expanded=True):
+        with st.expander(
+            f"**{cat}**  —  {beat_n}/{total} beat Nifty  |  Avg: {avg:.1f}%  |  Median: {median:.1f}%",
+            expanded=True
+        ):
             st.plotly_chart(fig, use_container_width=True)
             tbl.columns = ["Fund", col_label, "vs Nifty"]
             st.dataframe(tbl, use_container_width=True, hide_index=True)
@@ -379,20 +397,22 @@ def render_sector_section(df, nifty_ref, ref_label, mode, col_label):
         return
     st.markdown("### 🏭 Sector Funds — Category Averages")
 
-    # Aggregate: mean return + fund count per sector
+    # Aggregate: mean + median + count per sector
     agg = (sec_df.groupby("Category")["Return"]
-           .agg(Avg="mean", Count="count", Best="max", Worst="min")
+           .agg(Avg="mean", Median="median", Count="count", Best="max", Worst="min")
            .reset_index()
            .sort_values("Avg", ascending=False))
 
     # Summary table
     tbl = agg.copy()
-    tbl["vs Nifty"] = (tbl["Avg"] - nifty_ref).map(
+    tbl["vs Nifty (Avg)"] = (tbl["Avg"] - nifty_ref).map(
         lambda x: f"+{x:.1f}%" if x >= 0 else f"{x:.1f}%")
-    tbl["Best"]  = tbl["Best"].map("{:.1f}%".format)
-    tbl["Worst"] = tbl["Worst"].map("{:.1f}%".format)
-    tbl["Avg"]   = tbl["Avg"].map("{:.1f}%".format)
-    tbl.columns  = ["Sector", "Avg Return", "# Funds", "Best Fund Return", "Worst Fund Return", "vs Nifty"]
+    tbl["Best"]   = tbl["Best"].map("{:.1f}%".format)
+    tbl["Worst"]  = tbl["Worst"].map("{:.1f}%".format)
+    tbl["Avg"]    = tbl["Avg"].map("{:.1f}%".format)
+    tbl["Median"] = tbl["Median"].map("{:.1f}%".format)
+    tbl = tbl[["Category", "Count", "Avg", "Median", "Best", "Worst", "vs Nifty (Avg)"]]
+    tbl.columns = ["Sector", "# Funds", "Avg Return", "Median Return", "Best Fund Return", "Worst Fund Return", "vs Nifty (Avg)"]
     st.dataframe(tbl, use_container_width=True, hide_index=True)
     st.markdown("")
 
