@@ -45,14 +45,14 @@ def load_all_data():
         if "large & mid" in n or "large and mid" in n or "large midcap" in n: return "Large & Mid Cap"
         if "large cap"   in n or "largecap"   in n: return "Large Cap"
         if "mid cap"     in n or "midcap"     in n: return "Mid Cap"
+        if "multi asset" in n or "multi-asset" in n or "multiasset" in n: return "Multi Asset"
+        if any(x in n for x in ["infra", "psu", "manufactur", "engineer", "build", "tiger", "t.i.g.e.r", "mfg"]): return "Infrastructure"
         if any(x in n for x in ["bank", "fin serv", "financial serv", "finserv", "bfsi"]): return "Banking & Finance"
         if any(x in n for x in ["pharma", "health", "medic"]): return "Pharma & Healthcare"
         if any(x in n for x in ["tech", "teck", "informat", "it fund", "digital", "services", "export"]): return "Technology"
-        if any(x in n for x in ["infra", "psu", "manufactur", "engineer", "build", "tiger", "t.i.g.e.r"]): return "Infrastructure"
         if any(x in n for x in ["consum", "fmcg", "retail"]): return "Consumption"
         if any(x in n for x in ["energy", "power", "resource", "oil", "gas"]): return "Energy"
         if any(x in n for x in ["auto", "mobil", "transport"]): return "Automotive"
-        if "multi asset" in n or "multi-asset" in n or "multiasset" in n: return "Multi Asset"
         return "Other"
 
     cat_map  = {col: classify(col) for col in funds.columns}
